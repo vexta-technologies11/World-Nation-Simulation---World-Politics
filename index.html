@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Sovereign State: Global Hegemony</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- TOP HUD BAR -->
+  <header id="hud">
+    <div class="hud-left">
+      <span class="hud-item treasury">💰 <strong>Treasury:</strong> $<span id="treasuryVal">2,450,000</span>M</span>
+      <span class="hud-item approval">👍 <strong>Approval:</strong> <span id="approvalVal">58</span>%</span>
+      <span class="hud-item threat">⚠️ <strong>Threat:</strong> <span id="threatVal">Low</span></span>
+    </div>
+    <div class="hud-center">
+      <span class="hud-item date">📅 <span id="dateDisplay">June 2025</span></span>
+      <span class="hud-item turn">Turn: <span id="turnVal">0</span></span>
+    </div>
+    <div class="hud-right">
+      <div class="speed-controls">
+        <button class="speed-btn active" data-speed="0" title="Paused">⏸</button>
+        <button class="speed-btn" data-speed="1">1×</button>
+        <button class="speed-btn" data-speed="2">2×</button>
+        <button class="speed-btn" data-speed="5">5×</button>
+        <button class="speed-btn" data-speed="10">10×</button>
+      </div>
+      <button id="menuBtn" class="icon-btn" title="Menu">☰</button>
+    </div>
+  </header>
+
+  <!-- MAIN LAYOUT: SIDEBAR LEFT + MAP CENTER + SIDEBAR RIGHT -->
+  <main id="mainLayout">
+    <!-- LEFT SIDEBAR (Nation Card / Quick Info) -->
+    <aside id="leftSidebar" class="sidebar">
+      <div id="nationCard">
+        <div class="nation-flag">🇺🇸</div>
+        <h2 class="nation-name">United States</h2>
+        <p class="nation-leader">President: James Holloway</p>
+        <div class="nation-stats">
+          <div class="stat-row"><span class="stat-label">GDP</span><span class="stat-val">$25.0T</span></div>
+          <div class="stat-row"><span class="stat-label">Population</span><span class="stat-val">331M</span></div>
+          <div class="stat-row"><span class="stat-label">Military</span><span class="stat-val"><span class="bar-fill" style="width:78%">78</span></span></div>
+          <div class="stat-row"><span class="stat-label">Tech Avg</span><span class="stat-val">T5.5</span></div>
+        </div>
+        <div class="nation-relations">
+          <span class="relation-badge friendly">🤝 Friendly</span>
+        </div>
+        <div class="nation-actions">
+          <button class="btn-sm">⚔️ Declare War</button>
+          <button class="btn-sm">🤝 Trade</button>
+          <button class="btn-sm">✈️ Visit</button>
+        </div>
+      </div>
+
+      <div id="leaderInfo">
+        <h3>👤 Leader</h3>
+        <div class="leader-portrait">👤</div>
+        <p class="leader-name">James Holloway</p>
+        <div class="leader-traits">
+          <span class="trait">Pragmatist</span>
+          <span class="trait">Economist</span>
+        </div>
+        <div class="leader-term">Term: 2025–2029</div>
+      </div>
+    </aside>
+
+    <!-- CENTER: WORLD MAP -->
+    <section id="mapContainer">
+      <canvas id="worldMap"></canvas>
+      <div id="mapControls">
+        <button id="zoomIn" class="icon-btn">➕</button>
+        <button id="zoomOut" class="icon-btn">➖</button>
+        <button id="resetView" class="icon-btn">🗺</button>
+      </div>
+      <div id="mapLayerToggles">
+        <button class="layer-btn active" data-layer="political">Political</button>
+        <button class="layer-btn" data-layer="military">Military</button>
+        <button class="layer-btn" data-layer="economic">Economic</button>
+        <button class="layer-btn" data-layer="resources">Resources</button>
+      </div>
+    </section>
+
+    <!-- RIGHT SIDEBAR (News Ticker + Quick Actions) -->
+    <aside id="rightSidebar" class="sidebar">
+      <div id="newsPanel">
+        <div class="panel-header">
+          <h3>📰 World News</h3>
+          <span class="news-count" id="newsCount">3</span>
+        </div>
+        <div id="newsTicker" class="news-ticker">
+          <div class="news-item minor">📌 China GDP growth slows to 4.2%</div>
+          <div class="news-item major">⚡ Russia achieves Nuclear Fusion research breakthrough</div>
+          <div class="news-item critical">🔥 BREAKING: Border conflict erupts between India and Pakistan</div>
+        </div>
+      </div>
+
+      <div id="quickActions">
+        <h3>⚡ Quick Actions</h3>
+        <div class="action-grid">
+          <button class="action-btn" data-tab="gov">🏛️ Gov</button>
+          <button class="action-btn" data-tab="econ">💰 Econ</button>
+          <button class="action-btn" data-tab="mil">⚔️ Mil</button>
+          <button class="action-btn" data-tab="diplo">🤝 Diplo</button>
+          <button class="action-btn" data-tab="intel">🕵️ Intel</button>
+          <button class="action-btn" data-tab="space">🚀 Space</button>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- BOTTOM TAB BAR (Mobile friendly) -->
+  <nav id="bottomTabs">
+    <button class="tab-btn active" data-tab="gov">🏛️ Gov</button>
+    <button class="tab-btn" data-tab="econ">💰 Econ</button>
+    <button class="tab-btn" data-tab="mil">⚔️ Mil</button>
+    <button class="tab-btn" data-tab="diplo">🤝 Diplo</button>
+    <button class="tab-btn" data-tab="intel">🕵️ Intel</button>
+    <button class="tab-btn" data-tab="space">🚀 Space</button>
+  </nav>
+
+  <!-- TAB CONTENT OVERLAY -->
+  <div id="tabOverlay" class="tab-overlay hidden">
+    <div class="tab-panel">
+      <div class="tab-header">
+        <h2 id="tabTitle">Government</h2>
+        <button id="closeTab" class="icon-btn">✕</button>
+      </div>
+      <div id="tabContent" class="tab-content">
+        <!-- Dynamic content loaded by JS -->
+      </div>
+    </div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
