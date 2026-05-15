@@ -69,6 +69,11 @@
     <!-- CENTER: WORLD MAP -->
     <section id="mapContainer">
       <canvas id="worldMap"></canvas>
+      <div id="mapHudPanel">
+        <div class="map-title">🌍 Global Situation Room</div>
+        <div id="mapMeta" class="map-meta">Tracking strategic nations</div>
+        <div id="mapSelection" class="map-selection">Focus: United States</div>
+      </div>
       <div id="mapControls">
         <button id="zoomIn" class="icon-btn">➕</button>
         <button id="zoomOut" class="icon-btn">➖</button>
@@ -107,6 +112,16 @@
           <button class="action-btn" data-tab="space">🚀 Space</button>
         </div>
       </div>
+
+      <div id="countryRegistry">
+        <div class="panel-header">
+          <h3>🌐 Country Registry</h3>
+          <span class="news-count" id="countryCount">0</span>
+        </div>
+        <div id="registrySummary" class="registry-summary"></div>
+        <input id="countrySearch" class="country-search" type="search" placeholder="Search country or code">
+        <div id="countryList" class="country-list"></div>
+      </div>
     </aside>
   </main>
 
@@ -133,6 +148,7 @@
     </div>
   </div>
 
+  <script src="country-data.js"></script>
   <script src="game.js"></script>
 </body>
 </html>

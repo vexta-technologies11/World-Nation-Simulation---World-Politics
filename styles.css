@@ -269,7 +269,9 @@ html, body {
 #mapContainer {
   flex: 1;
   position: relative;
-  background: #0a0e14;
+  background:
+    radial-gradient(circle at top, rgba(74, 144, 217, 0.2), transparent 32%),
+    linear-gradient(180deg, #04111f 0%, #06162a 45%, #031019 100%);
   overflow: hidden;
 }
 
@@ -277,6 +279,38 @@ html, body {
   width: 100%;
   height: 100%;
   display: block;
+}
+
+#mapHudPanel {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 11;
+  min-width: 240px;
+  background: rgba(11, 14, 20, 0.78);
+  border: 1px solid rgba(74, 144, 217, 0.28);
+  backdrop-filter: blur(12px);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.3);
+}
+
+.map-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.map-meta,
+.map-selection {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.map-selection {
+  margin-top: 6px;
+  color: var(--text-primary);
 }
 
 #mapControls {
@@ -398,6 +432,92 @@ html, body {
 
 .action-btn:hover { background: var(--accent-blue); border-color: var(--accent-blue); }
 
+/* Country Registry */
+#countryRegistry {
+  background: var(--bg-card);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  border: 1px solid var(--border-color);
+}
+
+.registry-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.continent-pill,
+.stat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(74, 144, 217, 0.12);
+  border: 1px solid rgba(74, 144, 217, 0.2);
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.continent-pill strong {
+  color: var(--text-primary);
+}
+
+.country-search {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  margin-bottom: 10px;
+}
+
+.country-search:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+}
+
+.country-list {
+  max-height: 220px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.country-row {
+  width: 100%;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text-primary);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  text-align: left;
+  transition: all 0.15s;
+}
+
+.country-row:hover,
+.country-row.active {
+  background: rgba(74, 144, 217, 0.14);
+  border-color: rgba(74, 144, 217, 0.32);
+}
+
+.country-row-main {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.country-row-meta {
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
 /* === BOTTOM TABS === */
 #bottomTabs {
   position: fixed;
@@ -480,6 +600,18 @@ html, body {
 /* Tab Content Styles */
 .tab-section { margin-bottom: 20px; }
 .tab-section h3 { font-size: 14px; color: var(--text-secondary); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+.nation-subtitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--accent-blue);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+}
 
 .budget-slider-row {
   display: flex;
@@ -645,6 +777,8 @@ html, body {
 
   #mapLayerToggles { top: 8px; left: 8px; }
   .layer-btn { font-size: 9px; padding: 3px 7px; }
+  #mapHudPanel { top: auto; right: 8px; bottom: 16px; left: 8px; min-width: 0; }
+  .country-list { max-height: 180px; }
 
   /* Show sidebar toggle buttons on mobile */
   #showLeftSidebar, #showRightSidebar {
