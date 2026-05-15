@@ -56,6 +56,15 @@ const CONTINENT_POLYGONS = [
   { fill: 'rgba(184, 196, 214, 0.12)', stroke: 'rgba(240, 246, 255, 0.26)', points: [[0.06, 0.86], [0.20, 0.83], [0.40, 0.86], [0.60, 0.85], [0.82, 0.88], [0.94, 0.92], [0.08, 0.95]] },
 ];
 
+const MIN_MAP_SCALE = 0.65;
+const MAX_MAP_SCALE = 3;
+const ZOOM_IN_FACTOR = 1.22;
+const ZOOM_OUT_FACTOR = 0.82;
+const ZOOM_WHEEL_STEP = 0.12;
+const DRAG_THRESHOLD = 6;
+const FEATURED_NATION_HIT_RADIUS = 14;
+const REGULAR_NATION_HIT_RADIUS = 8;
+
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
@@ -535,7 +544,7 @@ function findNationAtPoint(clientX, clientY) {
 
   NATION_LIST.forEach((nation) => {
     const distance = Math.hypot(localX - (nation.x * width), localY - (nation.y * height));
-    const threshold = nation.featured ? 14 : 8;
+    const threshold = nation.featured ? FEATURED_NATION_HIT_RADIUS : REGULAR_NATION_HIT_RADIUS;
     if (distance <= threshold && distance < closestDistance) {
       closestNation = nation;
       closestDistance = distance;
@@ -550,12 +559,12 @@ function findNationAtPoint(clientX, clientY) {
 // ============================================================
 function setupMapControls() {
   $('#zoomIn').addEventListener('click', () => {
-    mapScale = Math.min(3, mapScale * 1.22);
+    mapScale = Math.min(MAX_MAP_SCALE, mapScale * ZOOM_IN_FACTOR);
     renderMap();
   });
 
   $('#zoomOut').addEventListener('click', () => {
-    mapScale = Math.max(0.65, mapScale * 0.82);
+    mapScale = Math.max(MIN_MAP_SCALE, mapScale * ZOOM_OUT_FACTOR);
     renderMap();
   });
 
@@ -597,7 +606,7 @@ function setupMapControls() {
   canvas.addEventListener('mouseup', () => { isDragging = false; });
   canvas.addEventListener('mouseleave', () => { isDragging = false; });
   canvas.addEventListener('click', (e) => {
-    if (dragDistance > 6) {
+    if (dragDistance > DRAG_THRESHOLD) {
       dragDistance = 0;
       return;
     }
@@ -615,7 +624,7 @@ function setupMapControls() {
   });
   canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
-    mapScale = clamp(mapScale + (e.deltaY < 0 ? 0.12 : -0.12), 0.65, 3);
+    mapScale = clamp(mapScale + (e.deltaY < 0 ? ZOOM_WHEEL_STEP : -ZOOM_WHEEL_STEP), MIN_MAP_SCALE, MAX_MAP_SCALE);
     renderMap();
   }, { passive: false });
 
