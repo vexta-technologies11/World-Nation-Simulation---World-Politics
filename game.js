@@ -64,6 +64,9 @@ const ZOOM_WHEEL_STEP = 0.12;
 const DRAG_THRESHOLD = 6;
 const FEATURED_NATION_HIT_RADIUS = 14;
 const REGULAR_NATION_HIT_RADIUS = 8;
+const GDP_BASELINE = 0.2;
+const GDP_SEED_MULTIPLIER = 13;
+const GDP_VARIANCE_BUCKETS = 220;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -119,7 +122,7 @@ function buildNation(country) {
     leaderTitle: 'Head of Government',
     leaderTraits: getLeaderTraits(continent, seed),
     leaderTerm: '2025–2029',
-    gdp: Number((0.2 + ((seed * 13) % 220) / 10).toFixed(1)),
+    gdp: Number((GDP_BASELINE + ((seed * GDP_SEED_MULTIPLIER) % GDP_VARIANCE_BUCKETS) / 10).toFixed(1)),
     population: clamp(Math.round(1 + (seed * 17) % 240), 1, 240),
     militaryPower: clamp(18 + (seed * 7) % 68, 12, 92),
     techLevel: Number((2.0 + ((seed * 11) % 40) / 10).toFixed(1)),
@@ -258,9 +261,9 @@ function formatMoney(m) {
   return '$' + Math.round(m) + 'M';
 }
 
-function formatPopulation(population) {
-  if (population >= 1000) return `${(population / 1000).toFixed(2)}B`;
-  return `${Math.round(population)}M`;
+function formatPopulation(populationMillions) {
+  if (populationMillions >= 1000) return `${(populationMillions / 1000).toFixed(2)}B`;
+  return `${Math.round(populationMillions)}M`;
 }
 
 function formatContinent(continent) {
