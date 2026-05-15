@@ -3001,19 +3001,6 @@ function simulateTurn() {
 
   processGlobalMarketCycle();
 
-  // Budget effects on treasury
-  const income = 200 + Math.random() * 100;
-  const spending = (
-    GAME.budget.military * 2 +
-    GAME.budget.economy * 0.5 +
-    GAME.budget.diplomacy * 1.5 +
-    GAME.budget.intelligence * 1.2 +
-    GAME.budget.space * 3 +
-    GAME.budget.social * 1.8
-  );
-  const netIncome = Math.round(income - spending);
-  GAME.treasury += netIncome;
-
   // Random event
   if (Math.random() < 0.35) {
     const event = EVENTS_POOL[Math.floor(Math.random() * EVENTS_POOL.length)];
@@ -3058,6 +3045,9 @@ function simulateTurn() {
   // ── GLOBAL ARMS MARKET ────────────────────────────────────
   processArmsMarketAll();
 
+  // ── ECONOMIC SYSTEMS ──────────────────────────────────────
+  processAllEconomicSystems();
+
   // ── AI TECH TRADING ────────────────────────────────────
   // AI nations with high research and discovered techs sell to weaker nations
   processTechTrading();
@@ -3077,17 +3067,6 @@ function simulateTurn() {
       5,
       100
     );
-
-    const macroTreasury = Math.round(
-      player.gdp * 3.8 -
-      player.inflation * 6.5 -
-      player.debtRatio * 0.45 +
-      player.resources * 0.32 -
-      player.deficit * 6.8 -
-      player.corruption * 1.3 +
-      (player.failedState ? -160 : 0)
-    );
-    GAME.treasury = Math.max(100, GAME.treasury + macroTreasury);
   }
 
   syncPlayerNationFromRecord();
@@ -3802,6 +3781,10 @@ function renderNationCard() {
       <div class="stat-row"><span class="stat-label">Budget: Space</span><span class="stat-val">${Math.round(budget.space)}%</span></div>
       <div class="stat-row"><span class="stat-label">Budget: Social</span><span class="stat-val">${Math.round(budget.social)}%</span></div>
       <div class="stat-row"><span class="stat-label">GDP</span><span class="stat-val">$${p.gdp.toFixed(1)}T</span></div>
+      <div class="stat-row"><span class="stat-label">Tax Revenue</span><span class="stat-val" style="color:var(--accent-green)">$${Math.round(p.taxRevenue || 0)}M</span></div>
+      <div class="stat-row"><span class="stat-label">Corporate Earnings</span><span class="stat-val" style="color:var(--accent-blue)">$${(p.corporateEarnings || 0).toFixed(1)}M</span></div>
+      <div class="stat-row"><span class="stat-label">Informal Economy</span><span class="stat-val ${(p.informalEconomy || 0) > 30 ? 'negative' : 'positive'}">${(p.informalEconomy || 0).toFixed(1)}%</span></div>
+      <div class="stat-row"><span class="stat-label">Companies</span><span class="stat-val">${(p.companies || []).length}</span></div>
       <div class="stat-row"><span class="stat-label">Population</span><span class="stat-val">${Math.round(p.population)}M</span></div>
       <div class="stat-row"><span class="stat-label">Military</span><span class="stat-val"><span class="bar-fill" style="width:${Math.round(p.militaryPower)}%">${Math.round(p.militaryPower)}</span></span></div>
       <div class="stat-row"><span class="stat-label">Tech Avg</span><span class="stat-val">T${p.techLevel.toFixed(1)}</span></div>
@@ -3831,6 +3814,21 @@ function renderNationCard() {
       <div class="stat-row"><span class="stat-label">Approval</span><span class="stat-val">${GAME.approval}%</span></div>`
         : `<div class="stat-row"><span class="stat-label">Relation</span><span class="stat-val ${relation >= 0 ? 'positive' : 'negative'}">${relation >= 0 ? '+' : ''}${relation}</span></div>`}
     </div>
+    ${(() => {
+      const comps = p.companies || [];
+      if (comps.length === 0) return '';
+      const top = comps.slice().sort((a,b) => b.revenue - a.revenue).slice(0, 10);
+      let h = '<div class="section-card" style="margin:8px 0;padding:6px 8px;font-size:11px"><div style="font-weight:600;font-size:12px;margin-bottom:4px">🏢 Companies (' + comps.length + ')</div>';
+      top.forEach((c, i) => {
+        const sectorIcon = ({agriculture:'🌾',manufacturing:'🏭',energy:'⚡',technology:'💻',services:'🏦',tourism:'✈️'})[c.sector] || '🏢';
+        h += '<div style="display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid rgba(84,140,196,0.1)">';
+        h += '<span>' + sectorIcon + ' ' + c.name + '</span>';
+        h += '<span style="color:var(--accent-green);font-weight:600">$' + c.revenue.toFixed(1) + 'M</span>';
+        h += '</div>';
+      });
+      h += '</div>';
+      return h;
+    })()}
     ${badge ? `<div class="nation-relations"><span class="relation-badge ${badge.cls}">${badge.text}</span></div>` : ''}
     <div class="nation-actions">
       ${isPlayer ? '' : `<button class="btn-sm" onclick="GAME.selectedNation = '${GAME.playerNation.id}'; renderNationCard(); renderMap();">🏠 Back To Player</button>`}
@@ -4020,48 +4018,103 @@ function renderGovernmentTab() {
 }
 
 // ============================================================
-// TAB: ECONOMY
+// TAB: ECONOMY (uses economic-system.js)
 // ============================================================
 function renderEconomyTab() {
+  // Our new economic tab from economic-system.js
   const b = GAME.budget;
-  return `
-    <div class="tab-section">
-      <h3>Budget Allocation</h3>
-      <p class="text-muted mb-1">Adjust spending priorities across departments.</p>
-      ${renderSlider('military', '⚔️ Military', b.military)}
-      ${renderSlider('economy', '💰 Economy', b.economy)}
-      ${renderSlider('diplomacy', '🤝 Diplomacy', b.diplomacy)}
-      ${renderSlider('intelligence', '🕵️ Intelligence', b.intelligence)}
-      ${renderSlider('space', '🚀 Space', b.space)}
-      ${renderSlider('social', '🏥 Social', b.social)}
-      <div style="margin-top:12px;padding:10px;background:var(--bg-card);border-radius:var(--radius-sm);border:1px solid var(--border-color)">
-        <div class="stat-row"><span class="stat-label">Total Budget</span><span class="stat-val" id="budgetTotal">100%</span></div>
-        <div class="stat-row"><span class="stat-label">Income (est.)</span><span class="stat-val" style="color:var(--accent-green)">+$225M/turn</span></div>
-      </div>
-    </div>
-    <div class="tab-section">
-      <h3>Resources</h3>
-      <div class="resource-grid">
-        <div class="resource-item"><span class="r-name">GDP</span><span class="r-val">$${GAME.playerNation.gdp}T</span></div>
-        <div class="resource-item"><span class="r-name">Population</span><span class="r-val">${GAME.playerNation.population}M</span></div>
-        <div class="resource-item"><span class="r-name">Treasury</span><span class="r-val">$${GAME.treasury}M</span></div>
-        <div class="resource-item"><span class="r-name">Tech Level</span><span class="r-val">T${GAME.playerNation.techLevel.toFixed(1)}</span></div>
-        <div class="resource-item"><span class="r-name">Inflation</span><span class="r-val ${GAME.playerNation.inflation <= 5 ? 'positive' : 'negative'}">${GAME.playerNation.inflation.toFixed(1)}%</span></div>
-        <div class="resource-item"><span class="r-name">Debt/GDP</span><span class="r-val ${GAME.playerNation.debtRatio <= 80 ? 'positive' : 'negative'}">${GAME.playerNation.debtRatio.toFixed(1)}%</span></div>
-        <div class="resource-item"><span class="r-name">Deficit</span><span class="r-val ${GAME.playerNation.deficit <= 4 ? 'positive' : 'negative'}">${GAME.playerNation.deficit.toFixed(1)}%</span></div>
-        <div class="resource-item"><span class="r-name">Factories</span><span class="r-val">${GAME.playerNation.factories.toFixed(1)}</span></div>
-        <div class="resource-item"><span class="r-name">Employment</span><span class="r-val ${GAME.playerNation.jobs >= 55 ? 'positive' : 'negative'}">${GAME.playerNation.jobs.toFixed(1)}</span></div>
-        <div class="resource-item"><span class="r-name">Religiosity</span><span class="r-val ${GAME.playerNation.religionInfluence <= 60 ? 'positive' : 'negative'}">${GAME.playerNation.religionInfluence.toFixed(1)}</span></div>
-        <div class="resource-item"><span class="r-name">Stock Index</span><span class="r-val ${GAME.playerNation.stockMarket >= 95 ? 'positive' : 'negative'}">${GAME.playerNation.stockMarket.toFixed(1)}</span></div>
-        <div class="resource-item"><span class="r-name">Corruption</span><span class="r-val ${GAME.playerNation.corruption <= 38 ? 'positive' : 'negative'}">${GAME.playerNation.corruption.toFixed(1)}</span></div>
-        <div class="resource-item"><span class="r-name">Innovation Risk</span><span class="r-val ${GAME.playerNation.innovationRisk <= 45 ? 'positive' : 'negative'}">${GAME.playerNation.innovationRisk.toFixed(1)}</span></div>
-        <div class="resource-item"><span class="r-name">Atrocity Risk</span><span class="r-val ${GAME.playerNation.atrocityRisk <= 20 ? 'positive' : 'negative'}">${GAME.playerNation.atrocityRisk.toFixed(1)}</span></div>
-        <div class="resource-item"><span class="r-name">Recession</span><span class="r-val ${GAME.playerNation.recessionMonths === 0 ? 'positive' : 'negative'}">${Math.round(GAME.playerNation.recessionMonths)}m</span></div>
-        <div class="resource-item"><span class="r-name">Crisis Risk</span><span class="r-val ${GAME.playerNation.crisisRisk <= 45 ? 'positive' : 'negative'}">${GAME.playerNation.crisisRisk.toFixed(1)}</span></div>
-        <div class="resource-item"><span class="r-name">National Doctrine</span><span class="r-val">${getDoctrineLabel(GAME.playerNation.policyDoctrine)}</span></div>
-      </div>
-    </div>
-  `;
+  const p = GAME.playerNation;
+  initNationIndustries(p);
+  const taxData = computeNationTaxRevenue(p);
+  
+  // Budget sliders + economic overview combined
+  let html = '<div class="tab-content">';
+  
+  // Top summary strip
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:12px">';
+  html += '<div class="resource-item"><span class="r-name">GDP</span><span class="r-val" style="font-size:16px;color:var(--accent-green)">$' + p.gdp.toFixed(2) + 'T</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Treasury</span><span class="r-val" style="font-size:16px;color:var(--accent-yellow)">$' + Math.round(GAME.treasury) + 'M</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Tax Revenue</span><span class="r-val" style="font-size:16px;color:var(--accent-blue)">$' + Math.round(taxData.total) + 'M</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Stock Market</span><span class="r-val" style="font-size:16px;color:' + ((p.stockMarket || 100) >= 100 ? 'var(--accent-green)' : 'var(--accent-red)') + '">' + (p.stockMarket || 100).toFixed(1) + '</span></div>';
+  html += '</div>';
+  
+  // Budget section (existing sliders)
+  html += '<div class="section-card">';
+  html += '<h4>📊 Budget Allocation</h4>';
+  html += '<p class="text-muted mb-1">Adjust spending priorities. Total tax revenue: $' + Math.round(taxData.total) + 'M/month</p>';
+  html += renderSlider('military', '⚔️ Military', b.military);
+  html += renderSlider('economy', '💰 Economy', b.economy);
+  html += renderSlider('diplomacy', '🤝 Diplomacy', b.diplomacy);
+  html += renderSlider('intelligence', '🕵️ Intelligence', b.intelligence);
+  html += renderSlider('space', '🚀 Space', b.space);
+  html += renderSlider('social', '🏥 Social', b.social);
+  html += '<div style="margin-top:8px;padding:8px;background:rgba(46,167,255,0.06);border-radius:var(--radius-sm);border:1px solid var(--border-color);font-size:12px">';
+  html += '<div class="stat-row"><span class="stat-label">Total Budget</span><span class="stat-val" id="budgetTotal">100%</span></div>';
+  html += '<div class="stat-row"><span class="stat-label">Tax Revenue</span><span class="stat-val" style="color:var(--accent-green)">+$' + Math.round(taxData.total) + 'M</span></div>';
+  html += '</div>';
+  html += '</div>';
+  
+  // Tax breakdown
+  html += '<div class="section-card"><h4>💰 Tax Collection</h4>';
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px">';
+  html += '<div class="resource-item"><span class="r-name">Corporate (' + (taxData.rates.corp * 100).toFixed(0) + '%)</span><span class="r-val">$' + Math.round(taxData.breakdown.corp) + 'M</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Income (' + (taxData.rates.income * 100).toFixed(0) + '%)</span><span class="r-val">$' + Math.round(taxData.breakdown.income) + 'M</span></div>';
+  html += '<div class="resource-item"><span class="r-name">VAT (' + (taxData.rates.vat * 100).toFixed(0) + '%)</span><span class="r-val">$' + Math.round(taxData.breakdown.vat) + 'M</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Tariffs (' + (taxData.rates.tariff * 100).toFixed(0) + '%)</span><span class="r-val">$' + Math.round(taxData.breakdown.tariff) + 'M</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Efficiency</span><span class="r-val" style="color:' + (taxData.efficiency > 0.7 ? 'var(--accent-green)' : 'var(--accent-red)') + '">' + (taxData.efficiency * 100).toFixed(0) + '%</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Informal Economy</span><span class="r-val" style="color:' + (p.informalEconomy > 30 ? 'var(--accent-red)' : 'var(--accent-green)') + '">' + p.informalEconomy.toFixed(1) + '%</span></div>';
+  html += '</div></div>';
+  
+  // Key indicators
+  html += '<div class="section-card"><h4>📈 Key Indicators</h4>';
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px">';
+  html += '<div class="resource-item"><span class="r-name">Inflation</span><span class="r-val ' + (p.inflation <= 5 ? 'positive' : 'negative') + '">' + p.inflation.toFixed(1) + '%</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Debt/GDP</span><span class="r-val ' + (p.debtRatio <= 80 ? 'positive' : 'negative') + '">' + p.debtRatio.toFixed(1) + '%</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Deficit</span><span class="r-val ' + (p.deficit <= 4 ? 'positive' : 'negative') + '">' + p.deficit.toFixed(1) + '%</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Employment</span><span class="r-val ' + (p.jobs >= 55 ? 'positive' : 'negative') + '">' + p.jobs.toFixed(1) + '</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Corruption</span><span class="r-val ' + (p.corruption <= 38 ? 'positive' : 'negative') + '">' + p.corruption.toFixed(1) + '</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Corporate Earnings</span><span class="r-val" style="color:var(--accent-blue)">$' + (p.corporateEarnings || 0).toFixed(1) + 'M</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Recession (months)</span><span class="r-val ' + (p.recessionMonths === 0 ? 'positive' : 'negative') + '">' + Math.round(p.recessionMonths || 0) + 'mo</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Crisis Risk</span><span class="r-val ' + (p.crisisRisk <= 45 ? 'positive' : 'negative') + '">' + p.crisisRisk.toFixed(1) + '</span></div>';
+  html += '</div></div>';
+  
+  // Industry sectors
+  html += '<div class="section-card"><h4>🏗️ Industry Sectors</h4>';
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">';
+  INDUSTRY_SECTORS.forEach(function(sector) {
+    const data = p.industries[sector.id];
+    if (!data) return;
+    html += '<div style="background:rgba(9,28,54,0.5);border:1px solid var(--border-color);border-radius:6px;padding:8px">';
+    html += '<div style="font-weight:600;font-size:11px;margin-bottom:2px">' + sector.icon + ' ' + sector.label + '</div>';
+    html += '<div style="font-size:10px;color:var(--text-secondary)">' + data.companyCount + ' companies<br>$' + (data.totalRevenue || 0).toFixed(1) + 'M rev</div></div>';
+  });
+  html += '</div></div>';
+  
+  // Top companies
+  const topCompanies = p.companies.slice().sort(function(a, b) { return b.revenue - a.revenue; }).slice(0, 8);
+  html += '<div class="section-card"><h4>🏢 Top Companies (' + p.companies.length + ' total)</h4>';
+  if (topCompanies.length === 0) {
+    html += '<p class="empty">No companies yet. Improve education and governance.</p>';
+  } else {
+    html += '<div style="max-height:250px;overflow-y:auto">';
+    topCompanies.forEach(function(company, idx) {
+      const sector = INDUSTRY_SECTORS.find(function(s) { return s.id === company.sector; });
+      html += '<div style="display:flex;align-items:center;gap:6px;padding:4px 6px;border-bottom:1px solid rgba(84,140,196,0.12);font-size:11px">';
+      html += '<span style="color:var(--text-muted);width:18px">#' + (idx+1) + '</span>';
+      html += '<span style="font-weight:500;flex:1">' + (sector ? sector.icon : '') + ' ' + company.name + '</span>';
+      html += '<span style="color:var(--text-secondary);font-size:9px;background:rgba(46,167,255,0.1);padding:1px 4px;border-radius:3px">' + company.size + '</span>';
+      html += '<span style="color:var(--accent-green);font-weight:600">$' + company.revenue.toFixed(1) + 'M</span>';
+      if (company.public) {
+        html += '<span style="color:var(--accent-blue)">$' + company.stockPrice.toFixed(1) + '</span>';
+      }
+      html += '</div>';
+    });
+    html += '</div>';
+  }
+  html += '</div>';
+  
+  html += '</div>';
+  return html;
 }
 
 function renderSocietyTab() {
