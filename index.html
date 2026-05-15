@@ -4,6 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Sovereign State: Global Hegemony</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -68,6 +71,12 @@
 
     <!-- CENTER: WORLD MAP -->
     <section id="mapContainer">
+      <img
+        id="mapBackdrop"
+        src="assets/world-map.png"
+        alt="World map backdrop"
+        onerror="this.onerror=null;this.src='https://upload.wikimedia.org/wikipedia/commons/8/80/World_map_-_low_resolution.svg';"
+      >
       <canvas id="worldMap"></canvas>
       <div id="mapControls">
         <button id="zoomIn" class="icon-btn">➕</button>
@@ -79,6 +88,8 @@
         <button class="layer-btn" data-layer="military">Military</button>
         <button class="layer-btn" data-layer="economic">Economic</button>
         <button class="layer-btn" data-layer="resources">Resources</button>
+        <button class="layer-btn" data-layer="stability">Stability</button>
+        <button class="layer-btn" data-layer="climate">Climate</button>
       </div>
     </section>
 
@@ -101,10 +112,16 @@
         <div class="action-grid">
           <button class="action-btn" data-tab="gov">🏛️ Gov</button>
           <button class="action-btn" data-tab="econ">💰 Econ</button>
+          <button class="action-btn" data-tab="society">👥 Society</button>
+          <button class="action-btn" data-tab="environment">🌍 Env</button>
+          <button class="action-btn" data-tab="finance">🏦 Finance</button>
           <button class="action-btn" data-tab="mil">⚔️ Mil</button>
           <button class="action-btn" data-tab="diplo">🤝 Diplo</button>
           <button class="action-btn" data-tab="intel">🕵️ Intel</button>
           <button class="action-btn" data-tab="space">🚀 Space</button>
+          <button class="action-btn" data-tab="research">🔬 Research</button>
+          <button class="action-btn" data-tab="history">📈 History</button>
+          <button class="action-btn" data-tab="leaderboard">🏆 Leaderboard</button>
         </div>
       </div>
     </aside>
@@ -114,10 +131,16 @@
   <nav id="bottomTabs">
     <button class="tab-btn active" data-tab="gov">🏛️ Gov</button>
     <button class="tab-btn" data-tab="econ">💰 Econ</button>
+    <button class="tab-btn" data-tab="society">👥 Soc</button>
+    <button class="tab-btn" data-tab="environment">🌍 Env</button>
+    <button class="tab-btn" data-tab="finance">🏦 Fin</button>
     <button class="tab-btn" data-tab="mil">⚔️ Mil</button>
     <button class="tab-btn" data-tab="diplo">🤝 Diplo</button>
     <button class="tab-btn" data-tab="intel">🕵️ Intel</button>
     <button class="tab-btn" data-tab="space">🚀 Space</button>
+    <button class="tab-btn" data-tab="research">🔬 Research</button>
+    <button class="tab-btn" data-tab="history">📈 History</button>
+    <button class="tab-btn" data-tab="leaderboard">🏆 Rank</button>
   </nav>
 
   <!-- TAB CONTENT OVERLAY -->
