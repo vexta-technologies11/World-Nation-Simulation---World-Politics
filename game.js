@@ -3048,6 +3048,16 @@ function simulateTurn() {
   processAlliancesAndConflicts();
   processAllianceLending();
 
+  // ── DEFENSE INDUSTRY PROCESSING ────────────────────────────
+  processAllDefenseCompanies();
+
+  // ── MILITARY FORCES PROCESSING ─────────────────────────────
+  processAllNationMilitaryForces();
+  processTechUpgradeSalesWithPayment(GAME.playerNation);
+
+  // ── GLOBAL ARMS MARKET ────────────────────────────────────
+  processArmsMarketAll();
+
   // ── AI TECH TRADING ────────────────────────────────────
   // AI nations with high research and discovered techs sell to weaker nations
   processTechTrading();
@@ -3824,10 +3834,11 @@ function renderNationCard() {
     ${badge ? `<div class="nation-relations"><span class="relation-badge ${badge.cls}">${badge.text}</span></div>` : ''}
     <div class="nation-actions">
       ${isPlayer ? '' : `<button class="btn-sm" onclick="GAME.selectedNation = '${GAME.playerNation.id}'; renderNationCard(); renderMap();">🏠 Back To Player</button>`}
-      ${isPlayer ? `<button class="btn-sm" onclick="openTab('diplo')">🤝 Open Diplomacy</button>` : `<button class="btn-sm" onclick="playerDeclareWar('${p.id}')">⚔️ Declare War</button>`}
-      ${isPlayer ? `<button class="btn-sm" onclick="openTab('econ')">💰 Open Economy</button>` : `<button class="btn-sm" onclick="playerFormAlliance('${p.id}')">🤝 Alliance</button>`}
-      ${isPlayer ? `<button class="btn-sm" onclick="openTab('research')">🔬 R&D Lab</button>` : `<button class="btn-sm" onclick="playerRaidResources('${p.id}')">🛢️ Raid Resources</button>`}
-      ${isPlayer ? `<button class="btn-sm" onclick="openTab('history')">📈 Strategic Intel</button>` : ''}
+      ${isPlayer ? `<button class="btn-sm" onclick="openTab('diplo')">🤝 Diplomacy</button>` : `<button class="btn-sm" onclick="playerDeclareWar('${p.id}')">⚔️ Declare War</button>`}
+      ${isPlayer ? `<button class="btn-sm" onclick="openTab('econ')">💰 Economy</button>` : `<button class="btn-sm" onclick="playerFormAlliance('${p.id}')">🤝 Alliance</button>`}
+      ${isPlayer ? `<button class="btn-sm" onclick="openTab('research')">🔬 R&D Lab</button>` : `<button class="btn-sm" onclick="openForeignNationIntel('${p.id}')">🔍 Investigate</button>`}
+      ${isPlayer ? `<button class="btn-sm" onclick="openTab('mil')">⚔️ Military</button>` : `<button class="btn-sm" onclick="openForeignNationIntel('${p.id}')">🏭 Defense Industry</button>`}
+      ${isPlayer ? `<button class="btn-sm" onclick="openTab('history')">📈 Intel</button>` : `<button class="btn-sm" onclick="playerRaidResources('${p.id}')">🛢️ Raid</button>`}
     </div>
   `;
 }
@@ -3922,7 +3933,7 @@ function renderTabContent(tab) {
       content.innerHTML = renderFinanceTab();
       break;
     case 'mil':
-      content.innerHTML = renderMilitaryTab();
+      content.innerHTML = renderMilitaryIndustrialTab();
       break;
     case 'diplo':
       content.innerHTML = renderDiplomacyTab();

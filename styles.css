@@ -1098,3 +1098,286 @@ body::before {
     letter-spacing: 0.02em;
   }
 }
+
+/* === MILITARY-INDUSTRIAL COMPLEX TAB STYLES === */
+.section-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  margin-bottom: 14px;
+}
+
+.section-card h4 {
+  font-size: 14px;
+  color: var(--accent-blue);
+  margin-bottom: 10px;
+  font-family: 'Orbitron', sans-serif;
+  letter-spacing: 0.03em;
+}
+
+.company-card {
+  background: rgba(9, 28, 54, 0.5);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.company-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.company-name {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.company-tier {
+  background: rgba(46, 167, 255, 0.2);
+  color: var(--accent-blue);
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.company-era {
+  color: var(--accent-yellow);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.company-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.company-stats {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.research-bar-container {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.research-label {
+  font-size: 10px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.research-bar-bg {
+  flex: 1;
+  height: 6px;
+  background: var(--bg-hover);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.research-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-blue), var(--accent-green));
+  border-radius: 3px;
+  transition: width 0.3s;
+}
+
+.research-pct {
+  font-size: 10px;
+  color: var(--accent-blue);
+  width: 32px;
+  text-align: right;
+  font-weight: 600;
+}
+
+.company-equipment {
+  margin-top: 6px;
+}
+
+.company-equipment h6 {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.equip-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  font-size: 11px;
+  border-bottom: 1px solid rgba(84, 140, 196, 0.12);
+}
+
+.equip-row:last-child {
+  border-bottom: none;
+}
+
+.equip-type {
+  background: rgba(46, 167, 255, 0.12);
+  color: var(--text-secondary);
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.equip-produced {
+  flex: 1;
+  text-align: right;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.research-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(84, 140, 196, 0.15);
+}
+
+.research-controls span {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-right: 4px;
+  line-height: 22px;
+}
+
+.btn-sm.active {
+  background: var(--accent-blue);
+  color: #fff;
+  border-color: var(--accent-blue);
+}
+
+.available-companies {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.avail-company {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgba(9, 28, 54, 0.4);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+.ac-name {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text-primary);
+  min-width: 120px;
+}
+
+.ac-desc {
+  flex: 1;
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.more {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+  margin-top: 6px;
+}
+
+.strength-display {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--accent-green);
+  text-align: center;
+  font-family: 'Orbitron', sans-serif;
+}
+
+.strength-breakdown {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 6px;
+}
+
+.empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 12px;
+}
+
+.subsection {
+  margin-bottom: 8px;
+}
+
+.subsection h5 {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 4px;
+}
+
+.equip-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.equip-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+  font-size: 11px;
+}
+
+.equip-name {
+  font-weight: 500;
+  flex: 1;
+}
+
+.equip-qty {
+  color: var(--accent-yellow);
+  font-weight: 600;
+}
+
+.equip-cond {
+  color: var(--accent-green);
+  font-size: 10px;
+}
+
+.btn-small {
+  background: var(--bg-hover);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-small:hover {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+}
