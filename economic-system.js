@@ -198,13 +198,60 @@ const TAX_BY_GOVERNMENT = {
 // ─── INDUSTRY SECTORS ─────────────────────────────────
 
 const INDUSTRY_SECTORS = [
-  { id: 'agriculture',   label: 'Agriculture',    baseRevenue: 0.5,  volatility: 0.15, icon: '🌾' },
-  { id: 'manufacturing', label: 'Manufacturing',   baseRevenue: 1.0,  volatility: 0.20, icon: '🏭' },
-  { id: 'energy',        label: 'Energy',          baseRevenue: 1.5,  volatility: 0.35, icon: '⚡' },
-  { id: 'technology',    label: 'Technology',      baseRevenue: 2.0,  volatility: 0.25, icon: '💻' },
-  { id: 'services',      label: 'Financial Services', baseRevenue: 1.2, volatility: 0.15, icon: '🏦' },
-  { id: 'tourism',       label: 'Tourism',         baseRevenue: 0.8,  volatility: 0.30, icon: '✈️' },
+
+
+
+
+
+
+  { id: 'agriculture',   label: 'Agriculture',    baseRevenue: 0.5,  volatility: 0.15, icon: '🌾', resourceReq: 'fertileLand', resourceWeight: 0.6 },
+  { id: 'manufacturing', label: 'Manufacturing',   baseRevenue: 1.0,  volatility: 0.20, icon: '🏭', resourceReq: 'minerals',    resourceWeight: 0.5 },
+  { id: 'energy',        label: 'Energy',          baseRevenue: 1.5,  volatility: 0.35, icon: '⚡', resourceReq: 'oil',         resourceWeight: 0.7 },
+  { id: 'technology',    label: 'Technology',      baseRevenue: 2.0,  volatility: 0.25, icon: '💻', resourceReq: 'rareEarth',   resourceWeight: 0.4 },
+  { id: 'services',      label: 'Financial Services', baseRevenue: 1.2, volatility: 0.15, icon: '🏦', resourceReq: null, resourceWeight: 0 },
+  { id: 'tourism',       label: 'Tourism',         baseRevenue: 0.8,  volatility: 0.30, icon: '✈️', resourceReq: null, resourceWeight: 0 },
 ];
+
+// ─── RESOURCE TYPES ──────────────────────────────────
+// Each nation gets random levels of these resources.
+// Resources deplete with industrial use but can recover with good env policy.
+const RESOURCE_TYPES = [
+  { id: 'oil',        label: 'Oil',         icon: '🛢️', basePrice: 1.0, depleteRate: 0.002 },
+  { id: 'rareEarth',  label: 'Rare Earth',  icon: '🧪', basePrice: 3.5, depleteRate: 0.001 },
+  { id: 'minerals',   label: 'Minerals',    icon: '⛏️', basePrice: 0.8, depleteRate: 0.003 },
+  { id: 'fertileLand',label: 'Fertile Land',icon: '🌱', basePrice: 0.3, depleteRate: 0.001 },
+];
+
+// ─── SEEDED RANDOM HELPER ────────────────────────────
+function seededResourceRand(seed) {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = ((h << 5) - h) + seed.charCodeAt(i);
+  h = (h * 1103515245 + 12345) & 0x7fffffff;
+  return () => { h = (h * 1103515245 + 12345) & 0x7fffffff; return h / 0x7fffffff; };
+}
+
+// ─── INIT NATION RESOURCES ───────────────────────────
+function initNationResources(nation) {
+  if (nation.resourceData) return;
+  const rng = seededResourceRand(nation.id || nation.name || 'default');
+  nation.resourceData = {};
+  RESOURCE_TYPES.forEach(rt => {
+    const base = 5 + rng() * 90;
+    const jackpot = rng() > 0.9 ? base + rng() * 40 : 0;
+    const level = Math.round(Math.min(base + jackpot, 100));
+    nation.resourceData[rt.id] = { level, depletion: 0, produced: 0, consumed: 0 };
+  });
+}
+
+// ─── GET RESOURCE MULTIPLIER FOR A SECTOR ────────────
+// Returns 0.2-2.0 multiplier based on how much resource the nation has.
+function getResourceMultiplier(nation, sectorId) {
+  const sector = INDUSTRY_SECTORS.find(s => s.id === sectorId);
+  if (!sector || !sector.resourceReq || !nation.resourceData) return 1.0;
+  const res = nation.resourceData[sector.resourceReq];
+  if (!res) return 1.0;
+  return clamp(res.level / 50, 0.2, 2.0);
+}
 
 // ─── INIT INDUSTRIES FOR A NATION ─────────────────────
 
@@ -236,6 +283,7 @@ function initNationIndustries(nation) {
 
 function generateNationCompanies(nation, initial = false) {
   initNationIndustries(nation);
+  initNationResources(nation);
   
   const pop = nation.population; // millions
   const edu = nation.education;
@@ -250,28 +298,41 @@ function generateNationCompanies(nation, initial = false) {
   // Governance factor: good governance enables business
   const govBusinessFactor = clamp(nation.governance / 40, 0.3, 2.0);
   
-  const baseCompaniesPerTurn = clamp(eduFactor * popFactor * govBusinessFactor * govFactor * 0.15, 0.05, 4);
+  const baseCompaniesPerTurn = clamp(eduFactor * popFactor * govBusinessFactor * govFactor * 0.25, 0.1, 6);
   
   // If initial, generate a stock of companies
-  const initialCount = initial ? Math.round(baseCompaniesPerTurn * 8 + Math.random() * 5) : Math.floor(baseCompaniesPerTurn);
+  const initialCount = initial ? Math.round(baseCompaniesPerTurn * 8 + Math.random() * 5) : (Math.random() < baseCompaniesPerTurn ? 1 : 0);
   
+  // Count research for sector distribution bonuses
+  const allDisc = nation.research?.discoveredTechs || [];
+  const allPurch = nation.research?.purchasedTechs || [];
+  const allResTechs = [...allDisc, ...allPurch];
+  let compTechs = 0, powerTechs = 0;
+  allResTechs.forEach(id => {
+    const t = findTechById(id);
+    if (!t) return;
+    if (t.branch === 'computing') compTechs++;
+    else if (t.branch === 'power' || t.branch === 'nuclear') powerTechs++;
+  });
+
   // Distribute by education level (low edu = mostly agriculture, high edu = mostly tech)
+  // Research shifts distribution toward related sectors
   const sectorWeights = {};
   if (edu < 25) {
     sectorWeights.agriculture = 0.50; sectorWeights.manufacturing = 0.20;
-    sectorWeights.energy = 0.10;       sectorWeights.technology = 0.02;
+    sectorWeights.energy = 0.10 + powerTechs * 0.002;       sectorWeights.technology = 0.02 + compTechs * 0.002;
     sectorWeights.services = 0.08;     sectorWeights.tourism = 0.10;
   } else if (edu < 45) {
     sectorWeights.agriculture = 0.30; sectorWeights.manufacturing = 0.30;
-    sectorWeights.energy = 0.12;       sectorWeights.technology = 0.05;
+    sectorWeights.energy = 0.12 + powerTechs * 0.002;       sectorWeights.technology = 0.05 + compTechs * 0.003;
     sectorWeights.services = 0.13;     sectorWeights.tourism = 0.10;
   } else if (edu < 65) {
     sectorWeights.agriculture = 0.15; sectorWeights.manufacturing = 0.25;
-    sectorWeights.energy = 0.15;       sectorWeights.technology = 0.15;
+    sectorWeights.energy = 0.15 + powerTechs * 0.002;       sectorWeights.technology = 0.15 + compTechs * 0.004;
     sectorWeights.services = 0.18;     sectorWeights.tourism = 0.12;
   } else {
     sectorWeights.agriculture = 0.05; sectorWeights.manufacturing = 0.15;
-    sectorWeights.energy = 0.10;       sectorWeights.technology = 0.30;
+    sectorWeights.energy = 0.10 + powerTechs * 0.001;       sectorWeights.technology = 0.30 + compTechs * 0.005;
     sectorWeights.services = 0.25;     sectorWeights.tourism = 0.15;
   }
   
@@ -300,9 +361,10 @@ function generateNationCompanies(nation, initial = false) {
     if (nation.companies.some(c => c.name === name)) continue;
     
     const baseRevenue = (INDUSTRY_SECTORS.find(s => s.id === chosenSector)?.baseRevenue || 1.0);
-    // Company revenue based on sector, size, tech, and education - NOT directly on GDP (avoids feedback loop)
+    // Company revenue: resource availability × tech × edu × market size
+    const resourceMult = getResourceMultiplier(nation, chosenSector);
     const marketSizeFactor = clamp(nation.population / 100, 0.3, 3.0);
-    const revenue = baseRevenue * sizeMultiplier * (0.5 + Math.random()) * clamp(tech / 5, 0.2, 2.5) * marketSizeFactor;
+    const revenue = baseRevenue * sizeMultiplier * (0.5 + Math.random()) * clamp(tech / 5, 0.2, 2.5) * marketSizeFactor * resourceMult;
     const employees = Math.round(revenue * (20 + Math.random() * 30) * (1 + eduFactor * 0.2));
     
     const company = {
@@ -339,11 +401,18 @@ function computeNationTaxRevenue(nation) {
   const govType = nation.governmentStyle;
   const taxConfig = TAX_BY_GOVERNMENT[govType] || TAX_BY_GOVERNMENT.federal_republic;
   const gdp = nation.gdp; // $T
-  const gdpMonthly = (gdp * 1000) / 12; // $M per month
+  const gdpMonthly = (gdp * 1_000_000) / 12; // $M per month (GDP in $T → $M monthly)
+  
+  // ── GDP PER CAPITA ADJUSTMENT ──
+  // Wealthier populations = more income tax per person
+  const gdpPerCapita = gdp / (nation.population / 1000);
+  const incomeMultiplier = clamp(gdpPerCapita * 0.5 + 0.3, 0.5, 2.5);
+  // Employment quality amplifies income tax (employed people actually pay)
+  const employmentFactor = clamp(nation.jobs / 55, 0.3, 1.5);
   
   // Tax base is GDP-based + corporate earnings
   const corporateBase = gdpMonthly * 0.4;
-  const incomeBase = gdpMonthly * 0.5;
+  const incomeBase = gdpMonthly * 0.5 * incomeMultiplier * employmentFactor;
   const consumptionBase = gdpMonthly * 0.3;
   const tradeBase = gdpMonthly * 0.1;
   
@@ -396,37 +465,167 @@ function processAllEconomicSystems() {
     
     // 7. Update corporate earnings tracking
     updateCorporateEarnings(nation);
+    
+    // ── NATION TREASURY (ALL nations) ──
+    // Initialize treasury if not set
+    if (nation.treasury === undefined) nation.treasury = taxData.total * 2;
+    
+    // Government spending based on budget
+    const govBudget = nation.aiBudget || { military: 20, economy: 15, diplomacy: 10, intelligence: 10, space: 5, social: 20 };
+    const totalBudgetPct = govBudget.military + govBudget.economy + govBudget.diplomacy + govBudget.intelligence + govBudget.space + govBudget.social;
+    const spendingMultiplier = taxData.total / Math.max(totalBudgetPct, 1);
+    
+    const govSpending = (
+      govBudget.military * spendingMultiplier * 1.2 +
+      govBudget.economy * spendingMultiplier * 1.0 +
+      govBudget.diplomacy * spendingMultiplier * 0.8 +
+      govBudget.intelligence * spendingMultiplier * 0.7 +
+      govBudget.space * spendingMultiplier * 0.9 +
+      govBudget.social * spendingMultiplier * 1.1
+    );
+    
+    // Debt service (% of tax revenue based on debt ratio, realistic ~2-5% of revenue)
+    const debtService = taxData.total * (nation.debtRatio || 40) * 0.0005;
+    const totalExpenses = govSpending + debtService;
+    
+    // Revenue includes taxes + actual company tax paid (companyTaxPaid is in $M)
+    let companyTaxCollected = 0;
+    nation.companies.forEach(c => { companyTaxCollected += c.taxPaid || 0; });
+    const totalRevenue = taxData.total + companyTaxCollected;
+    
+    // Update treasury
+    nation.treasury += Math.round(totalRevenue - totalExpenses);
+    nation.treasury = Math.max(0, nation.treasury);
+    
+    // Update deficit based on revenue vs spending
+    const deficitChange = (totalExpenses - totalRevenue) / (nation.gdp * 1_000_000 / 12 || 1);
+    nation.deficit = clamp(
+      (nation.deficit || 0) + deficitChange * 0.5,
+      -12, 35
+    );
   });
   
-  // 8. Apply player treasury from taxes
+  // 8. Apply player treasury from taxes (player still uses GAME.treasury)
   applyPlayerTreasuryFromTaxes();
 }
 
 // ─── UPDATE COMPANIES ─────────────────────────────────
 
 function updateNationCompanies(nation) {
+  initNationResources(nation);
   const edu = nation.education;
   const tech = nation.techLevel;
+  const resources = nation.resources;
+  const energySecurity = nation.energySecurity;
   const govFactor = (getGovernmentProfile(nation.governmentStyle)?.econBoost || 1.0);
+  
+  // Count discovered techs per branch for research-driven bonuses
+  const allDiscovered = nation.research?.discoveredTechs || [];
+  const allPurchased = nation.research?.purchasedTechs || [];
+  const allTechs = [...allDiscovered, ...allPurchased];
+  let compTechCount = 0, powerTechCount = 0, medTechCount = 0, nukeTechCount = 0;
+  allTechs.forEach(id => {
+    const t = findTechById(id);
+    if (!t) return;
+    if (t.branch === 'computing') compTechCount++;
+    else if (t.branch === 'power') powerTechCount++;
+    else if (t.branch === 'medicine') medTechCount++;
+    else if (t.branch === 'nuclear') nukeTechCount++;
+  });
+  
+  // Research multiplier per sector (tech discoveries boost the sector)
+  const researchMult = {
+    energy:       1 + clamp(powerTechCount + nukeTechCount, 0, 20) * 0.01,
+    technology:   1 + clamp(compTechCount, 0, 20) * 0.015,
+    manufacturing:1 + clamp(compTechCount, 0, 20) * 0.005,
+    agriculture:  1 + clamp(medTechCount, 0, 20) * 0.008,
+    services:     1 + clamp(compTechCount, 0, 20) * 0.004,
+    tourism:      1 + 0,
+  };
+  
+  // Resource & energy bottleneck factors
+  const resourceFactor = clamp(resources / 50, 0.3, 1.5);
+  const energyFactor = clamp(energySecurity / 45, 0.3, 1.5);
+  
+  // ── RESOURCE DEPLETION & CONSUMPTION ──
+  // Resource-consuming sectors deplete the resource each turn
+  RESOURCE_TYPES.forEach(rt => {
+    const data = nation.resourceData[rt.id];
+    if (!data) return;
+    // Natural depletion (tiny)
+    data.depletion = Math.max(0, data.depletion - rt.depleteRate * 0.1);
+    // Slow recovery toward base level (environment matters)
+    const targetLevel = 5 + (data.level + data.depletion) * 0.98;
+    data.level = clamp(data.level + (targetLevel - data.level) * 0.005 + (nation.environment - 50) * 0.003, 1, 100);
+    data.produced = 0;
+    data.consumed = 0;
+  });
   
   const companiesToRemove = [];
   
   nation.companies.forEach(company => {
-    // Company growth/decline
+    // Resource multiplier: how much resource availability boosts this company
+    const resourceMult = getResourceMultiplier(nation, company.sector);
+    
+    // Research multiplier for this sector
+    const rMult = researchMult[company.sector] || 1.0;
+    
+    // Sector-specific revenue modifiers from resources & research
+    let sectorBonus = 0;
+    if (company.sector === 'energy') {
+      sectorBonus = (resourceFactor - 1) * 0.008;
+      sectorBonus += clamp(nukeTechCount + powerTechCount, 0, 15) * 0.0008;
+    } else if (company.sector === 'technology') {
+      sectorBonus = clamp(compTechCount, 0, 20) * 0.0008;
+    } else if (company.sector === 'manufacturing') {
+      sectorBonus = (resourceFactor - 1) * 0.004;
+    } else if (company.sector === 'agriculture') {
+      sectorBonus = (resourceFactor - 1) * 0.002;
+    } else if (company.sector === 'services' || company.sector === 'tourism') {
+      sectorBonus = clamp(compTechCount, 0, 20) * 0.0004;
+    }
+    sectorBonus = clamp(sectorBonus, -0.015, 0.015);
+    
+    // Energy bottleneck: low energy security drags ALL companies
+    const energyDrag = energySecurity < 40 ? clamp((energySecurity - 40) * 0.0003, -0.012, 0) : 0;
+    
+    // Company growth/decline — now resource & research aware
     const innovationBonus = company.sector === 'technology' ? clamp((tech - 3) * 0.002, 0, 0.01) : 0;
     const eduBonus = clamp((edu - 30) * 0.0002, -0.005, 0.005);
     const randomShock = (Math.random() - 0.5) * 0.03;
     
-    company.growthRate = clamp(company.growthRate + innovationBonus + eduBonus + randomShock * 0.1, -0.08, 0.08);
-    company.revenue = clamp(company.revenue * (1 + company.growthRate), 0.01, 200);
+    company.growthRate = clamp(company.growthRate + innovationBonus + eduBonus + sectorBonus + energyDrag + randomShock * 0.1, -0.08, 0.08);
+    
+    // REVENUE: base × growth × resource multiplier × research multiplier
+    // This is the core supply chain: resources × tech × edu = output
+    const baseRevenueBefore = company.revenue;
+    company.revenue = clamp(company.revenue * (1 + company.growthRate) * resourceMult * rMult, 0.01, 200);
+    
+    // Track resource consumption: resource-using sectors consume resources
+    const sectorDef = INDUSTRY_SECTORS.find(s => s.id === company.sector);
+    if (sectorDef && sectorDef.resourceReq && nation.resourceData[sectorDef.resourceReq]) {
+      const consumed = company.revenue * 0.01 * sectorDef.resourceWeight;
+      nation.resourceData[sectorDef.resourceReq].consumed += consumed;
+      nation.resourceData[sectorDef.resourceReq].depletion += consumed * 0.001;
+    }
+    
+    // Resource-producing sectors (energy→oil, tech→rareEarth, etc.) produce resources
+    const prodResMap = { energy: 'oil', technology: 'rareEarth', manufacturing: 'minerals', agriculture: 'fertileLand' };
+    const produces = prodResMap[company.sector];
+    if (produces && nation.resourceData[produces]) {
+      const produced = company.revenue * 0.008 * clamp(tech / 5, 0.3, 2.0) * clamp(edu / 50, 0.3, 1.5);
+      nation.resourceData[produces].produced += produced;
+      nation.resourceData[produces].level = clamp(nation.resourceData[produces].level + produced * 0.001, 1, 100);
+    }
+    
     company.employees = Math.round(company.employees * (1 + company.growthRate * 0.5));
     company.employees = clamp(company.employees, 1, 50000);
     
     // Update sector totals
     const sector = nation.industries[company.sector];
     if (sector) {
-      sector.totalRevenue += company.revenue;
-      sector.totalEmployees += company.employees;
+      sector.totalRevenue = Math.max(0, sector.totalRevenue - baseRevenueBefore + company.revenue);
+      sector.totalEmployees += company.employees - Math.round(company.employees / (1 + company.growthRate * 0.5)) || 0;
     }
     
     // Company death (bankruptcy)
@@ -505,17 +704,23 @@ function updateNationGDP(nation, taxData) {
     infraFactor * 0.35 + factoryFactor * 0.30 + energyFactor * 0.20 + jobsFactor * 0.15
   ) * 0.001 * gov.econBoost; // max ~+0.12%/mo
   
-  // ── COMPANY SECTOR SIGNAL (small) ──
-  let sectorGrowth = 0;
+  // ── COMPANY REVENUE → GDP CONTRIBUTION ──
+  // Total company revenue ($M) scales GDP proportionally.
+  // GDP is in $T, so $1T = 1,000,000M. Company revenue boost = revenue / 1,000,000.
   let totalCompanyRevenue = 0;
+  let sectorGrowth = 0;
   INDUSTRY_SECTORS.forEach(sector => {
     const data = nation.industries[sector.id];
     if (data) {
       totalCompanyRevenue += data.totalRevenue || 0;
-      sectorGrowth += (data.growthRate || 0) * 0.03;
+      sectorGrowth += (data.growthRate || 0) * 0.3;
     }
   });
-  sectorGrowth = clamp(sectorGrowth, -0.001, 0.0015);
+  sectorGrowth = clamp(sectorGrowth, -0.008, 0.012);
+  
+  // Company activity directly adds to GDP (revenue in $M, GDP in $T)
+  // Every $1M company revenue = tiny GDP increment. Cap at 0.3% GDP boost/mo.
+  const companyGDPBoost = clamp(totalCompanyRevenue / 1_000_000 * 0.5, 0, 0.003);
   
   // ── CATCH-UP FOR POOR NATIONS (only if they have decent governance) ──
   let catchUpGrowth = 0;
@@ -537,16 +742,34 @@ function updateNationGDP(nation, taxData) {
   const warPenalty = getWarPressure(nation.id || '') * 0.004; // up to -0.4%
   const recessionPenalty = inRecession
     ? clamp((nation.recessionMonths || 0) * 0.0002, 0, 0.005) : 0;
+  // ── RESOURCE ABUNDANCE / BOTTLENECK ──
+  const resourcePenalty = nation.resources < 35
+    ? clamp((35 - nation.resources) * 0.00015, 0, 0.005) : 0;
+  const resourceBonus = nation.resources > 65
+    ? clamp((nation.resources - 65) * 0.0001, 0, 0.003) : 0;
+  // ── ENERGY BOTTLENECK ──
+  const energyPenalty = nation.energySecurity < 35
+    ? clamp((35 - nation.energySecurity) * 0.00012, 0, 0.004) : 0;
   
   // ── TAX DRAG (higher taxes slightly reduce growth) ──
   const taxDrag = taxData.rates.corp * 0.002 + taxData.rates.income * 0.001;
   
+  // ── GDP PER CAPITA TAX POWER ──
+  // Wealthier populations = stronger income tax base
+  const gdpPerCapita = nation.gdp / (nation.population / 1000); // $T per million people
+  const incomeTaxPower = clamp(gdpPerCapita * 0.5, 0.5, 3.0);
+  // Higher employment = more people paying tax
+  const employmentQuality = clamp(nation.jobs / 60, 0.3, 1.5);
+  // GDP per capita flows back into tax revenue via consumption
+  const populationTaxPower = clamp((incomeTaxPower * employmentQuality - 1) * 0.001, -0.003, 0.005);
+  
   // ── GDP GROWTH RATE ──
   const rawGrowth = 
     baseGrowth + innovationEngine + productivityEngine +
-    sectorGrowth + catchUpGrowth -
+    sectorGrowth + companyGDPBoost + catchUpGrowth + populationTaxPower -
     inflationPenalty - debtPenalty - inequalityPenalty -
-    corruptionPenalty - warPenalty - recessionPenalty - taxDrag;
+    corruptionPenalty - warPenalty - recessionPenalty - taxDrag -
+    resourcePenalty - energyPenalty + resourceBonus;
   
   // Boom momentum feeds in subtly
   const boomBoost = clamp(boomMomentum * 0.002, -0.002, 0.002);
@@ -681,23 +904,30 @@ function applyPlayerTreasuryFromTaxes() {
   const spendingMultiplier = totalTaxRevenue / Math.max(totalBudgetPct, 1);
   
   const spending = (
-    budget.military * spendingMultiplier * 0.4 +
-    budget.economy * spendingMultiplier * 0.1 +
-    budget.diplomacy * spendingMultiplier * 0.3 +
-    budget.intelligence * spendingMultiplier * 0.25 +
-    budget.space * spendingMultiplier * 0.6 +
-    budget.social * spendingMultiplier * 0.35
+    budget.military * spendingMultiplier * 1.2 +
+    budget.economy * spendingMultiplier * 1.0 +
+    budget.diplomacy * spendingMultiplier * 0.8 +
+    budget.intelligence * spendingMultiplier * 0.7 +
+    budget.space * spendingMultiplier * 0.9 +
+    budget.social * spendingMultiplier * 1.1
   );
   
-  // Debt service
-  const debtService = player.debtRatio * 0.15;
+  // Debt service (% of tax revenue based on debt ratio, realistic ~2-5% of revenue)
+  const debtService = totalTaxRevenue * (player.debtRatio || 40) * 0.0005;
   
-  const netRevenue = Math.round(totalTaxRevenue - spending - debtService);
+  // Also collect actual company taxes
+  let companyTaxCollected = 0;
+  player.companies.forEach(c => { companyTaxCollected += c.taxPaid || 0; });
+  
+  const netRevenue = Math.round(totalTaxRevenue + companyTaxCollected - spending - debtService);
   GAME.treasury += netRevenue;
   GAME.treasury = Math.max(50, GAME.treasury);
   
+  // Sync player's nation treasury with GAME treasury
+  player.treasury = GAME.treasury;
+  
   // Update deficit based on tax revenue vs spending
-  const deficitChange = ((spending + debtService) - totalTaxRevenue) / (player.gdp * 100);
+  const deficitChange = ((spending + debtService) - (totalTaxRevenue + companyTaxCollected)) / (player.gdp * 1_000_000 / 12 || 1);
   player.deficit = clamp(
     (player.deficit || 0) + deficitChange * 0.5 + (player.inflation > 8 ? 0.05 : -0.02) + (Math.random() - 0.5) * 0.1,
     -12, 35

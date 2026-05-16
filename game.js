@@ -13,7 +13,7 @@ const GAME = {
   timer: null,
   date: new Date(2025, 5, 1), // June 2025
 
-  treasury: 2450, // in millions
+  treasury: 150000, // in millions ($150B starting reserve)
   approval: 58,
   threatLevel: 'Low',
 
@@ -740,6 +740,13 @@ function syncPlayerNationFromRecord() {
     traits: [...record.traits],
     happiness: record.happiness,
     resilience: record.resilience,
+    companies: record.companies || [],
+    industries: record.industries || {},
+    taxRevenue: record.taxRevenue || 0,
+    corporateEarnings: record.corporateEarnings || 0,
+    treasury: record.treasury || GAME.treasury,
+    informalEconomy: record.informalEconomy || 0,
+    taxCollected: record.taxCollected || 0,
   };
 }
 
@@ -1839,71 +1846,6 @@ function runCountrySystemModel(nation, isPlayer = false, nationId = null) {
     nation.governance * 0.1
   ) / 100;
 
-  const stockSignal = (nation.stockMarket - 100) / 320;
-  const catchUpBoost = clamp((4.0 - nation.gdp) * 0.0042, 0, 0.018);
-  const recessionPenalty = clamp(nation.recessionMonths * 0.0012, 0, 0.012);
-
-  // ── GDP GROWTH RATE ────────────────────────────────────
-  // Now driven by boom momentum + leadership + government + education + environment synergy!
-  // Leadership provides the "spark" — great leaders in good governments with educated
-  // populations and clean environments can create sustained booms.
-  const leadershipSpark = decisionFactor * gov.econBoost * gov.innovationBoost;
-  const educationEnvMultiplier = educationEnvSynergy * 5 + 1;
-
-  // Boom momentum feeds back into GDP growth (virtuous cycle in booms, vicious in recessions)
-  const boomGrowthContribution = boomMomentum * 0.008;
-
-  const gdpGrowthRate = clamp(
-    0.0065 +
-    innovationEngine * 0.0075 * gov.innovationBoost +
-    productivityEngine * 0.0085 * gov.econBoost +
-    econ * 0.005 +
-    social * 0.0012 +
-    stockSignal +
-    globalMarketDrift * 0.0035 +
-    catchUpBoost +
-    allianceSupport * 0.0015 +
-    educationEnvSynergy +
-    govEducationSynergy +
-    boomGrowthContribution * leadershipSpark -
-    pressure * 0.0038 * gov.crisisVulnerability -
-    (nation.debtRatio * 0.00006) -
-    (Math.max(0, nation.deficit) * 0.00035) -
-    (nation.corruption * 0.00009) -
-    recessionPenalty -
-    warPressure * 0.0025 -
-    educationDrag -
-    religionDrag -
-    environmentDrag,
-    -0.045, 0.040
-  ) * (isBooming ? 1.15 : isRecession ? 0.85 : 1.0) * decisionFactor;
-
-  // ── BOOM OVERHEATING CHECK ─────────────────────────────
-  // Booms can overheat — if boomRisk is high, the boom may collapse next turn
-  // We handle the collapse here by checking if boom overheated
-  if (isBooming && boomRisk > 0.6 && Math.random() < boomRisk * 0.15) {
-    // Boom correction — the bubble pops
-    nation.stockMarket = clamp(nation.stockMarket - (10 + Math.random() * 15), 15, 240);
-    nation.inflation = clamp(nation.inflation + (1 + Math.random() * 1.5), 0.2, 45);
-    nation.inequality = clamp(nation.inequality + (2 + Math.random() * 3), 1, 100);
-    if (isPlayer || Math.random() < 0.15) {
-      addNews(`💥 ${nation.name} boom cycle overheats — market correction underway`, 'major');
-    }
-  }
-
-  // ── APPLY GDP CHANGE ──────────────────────────────────
-  const floorSupport = clamp((2.4 - nation.gdp) * 0.0125, 0, 0.03);
-  nation.gdp = clamp(nation.gdp * (1 + gdpGrowthRate + floorSupport) + rand(0.02), 0.03, 140);
-
-  if (nation.gdp < 1.2 && !nation.failedState) {
-    nation.gdp = clamp(nation.gdp * (1 + 0.01 + econ * 0.01 + allianceSupport * 0.004), 0.03, 140);
-    nation.deficit = clamp(nation.deficit - 0.2, -12, 35);
-    nation.crisisRisk = clamp(nation.crisisRisk - 0.8, 0, 100);
-  }
-
-  if (gdpGrowthRate < -0.004) nation.recessionMonths = clamp(nation.recessionMonths + 1, 0, 240);
-  else nation.recessionMonths = clamp(nation.recessionMonths - 1, 0, 240);
-
   // ── POPULATION ────────────────────────────────────────
   const fertilityPressure = clamp((nation.religionInfluence - 52) * 0.0015 + (40 - nation.education) * 0.0018, -0.02, 0.06);
   const jobsPressure = clamp((nation.jobs - 58) * 0.0007, -0.03, 0.02);
@@ -2095,16 +2037,16 @@ function runCountrySystemModel(nation, isPlayer = false, nationId = null) {
   );
 
   // ── DEBT RATIO ────────────────────────────────────────
+  // Debt now driven by deficit from economic-system.js (revenue vs spending)
+  // This is a small natural drift + deficit contribution
   nation.debtRatio = clamp(
     nation.debtRatio +
-    Math.max(0, nation.deficit) * 0.06 +
-    Math.max(0, nation.inflation - 3.5) * 0.04 +
-    military * 0.2 + social * 0.16 + space * 0.14 -
-    econ * 0.2 -
-    (nation.gdp / 110) * 0.18 -
-    (nation.governance - 50) * 0.012 -
-    allianceSupport * 0.05 +
-    rand(0.18),
+    Math.max(0, nation.deficit) * 0.08 +
+    (nation.inflation > 8 ? 0.2 : 0) +
+    (nation.inCrisis ? 0.3 : 0) -
+    (nation.gdp > 10 ? 0.05 : 0) -
+    (nation.governance - 50) * 0.005 +
+    rand(0.12),
     8, 260
   );
 
@@ -2161,24 +2103,6 @@ function runCountrySystemModel(nation, isPlayer = false, nationId = null) {
     (nation.inflation > 9 ? 0.15 : -0.05) +
     rand(0.26),
     -12, 35
-  );
-
-  // ── STOCK MARKET ──────────────────────────────────────
-  // Booms drive stock markets up; recessions drive them down.
-  nation.stockMarket = clamp(
-    nation.stockMarket +
-    (gdpGrowthRate * 95) +
-    (nation.governance - 50) * 0.03 -
-    nation.inflation * 0.14 -
-    nation.corruption * 0.03 -
-    nation.recessionMonths * 0.09 -
-    warPressure * 0.75 +
-    allianceSupport * 0.3 +
-    globalMarketDrift * 4.5 +
-    (GAME.marketCrashTurns > 0 ? -2 : 0) +
-    (isBooming ? 2 : isRecession ? -1.5 : 0) +
-    rand(1.2),
-    15, 240
   );
 
   // ── INEQUALITY ────────────────────────────────────────
@@ -2824,8 +2748,8 @@ function completeTechDiscovery(nation, branch, techId, tech) {
   // Boost to stock market (innovation excitement)
   nation.stockMarket = clamp(nation.stockMarket + tech.tier * 0.3 + 2, 15, 240);
   
-  // GDP boost from successful research
-  const gdpBoost = 0.002 + tech.tier * 0.0005;
+  // GDP boost from successful research (tiny — gdp is in $T)
+  const gdpBoost = (0.002 + tech.tier * 0.0005) / 100;
   nation.gdp = clamp(nation.gdp * (1 + gdpBoost), 0.03, 140);
   
   // Stability boost (national pride)
@@ -3753,6 +3677,14 @@ function setupMapControls() {
   }, { passive: false });
 }
 
+// ─── FORMAT MONEY HELPER ──────────────────────────────
+function formatMoney(val) {
+  if (!Number.isFinite(val)) return '$0';
+  if (val >= 1000000) return '$' + (val / 1000000).toFixed(2) + 'T';
+  if (val >= 1000) return '$' + (val / 1000).toFixed(1) + 'B';
+  return '$' + Math.round(val) + 'M';
+}
+
 // ============================================================
 // NATION CARD (Left Sidebar)
 // ============================================================
@@ -3781,8 +3713,9 @@ function renderNationCard() {
       <div class="stat-row"><span class="stat-label">Budget: Space</span><span class="stat-val">${Math.round(budget.space)}%</span></div>
       <div class="stat-row"><span class="stat-label">Budget: Social</span><span class="stat-val">${Math.round(budget.social)}%</span></div>
       <div class="stat-row"><span class="stat-label">GDP</span><span class="stat-val">$${p.gdp.toFixed(1)}T</span></div>
-      <div class="stat-row"><span class="stat-label">Tax Revenue</span><span class="stat-val" style="color:var(--accent-green)">$${Math.round(p.taxRevenue || 0)}M</span></div>
-      <div class="stat-row"><span class="stat-label">Corporate Earnings</span><span class="stat-val" style="color:var(--accent-blue)">$${(p.corporateEarnings || 0).toFixed(1)}M</span></div>
+      <div class="stat-row"><span class="stat-label">Treasury</span><span class="stat-val" style="color:var(--accent-yellow)">${formatMoney(p.treasury || 0)}</span></div>
+      <div class="stat-row"><span class="stat-label">Tax Revenue</span><span class="stat-val" style="color:var(--accent-green)">${formatMoney(Math.round(p.taxRevenue || 0))}/m</span></div>
+      <div class="stat-row"><span class="stat-label">Corporate Earnings</span><span class="stat-val" style="color:var(--accent-blue)">${formatMoney(p.corporateEarnings || 0)}</span></div>
       <div class="stat-row"><span class="stat-label">Informal Economy</span><span class="stat-val ${(p.informalEconomy || 0) > 30 ? 'negative' : 'positive'}">${(p.informalEconomy || 0).toFixed(1)}%</span></div>
       <div class="stat-row"><span class="stat-label">Companies</span><span class="stat-val">${(p.companies || []).length}</span></div>
       <div class="stat-row"><span class="stat-label">Population</span><span class="stat-val">${Math.round(p.population)}M</span></div>
@@ -3810,8 +3743,7 @@ function renderNationCard() {
       <div class="stat-row"><span class="stat-label">Status</span><span class="stat-val">${statusTag}</span></div>
       <div class="stat-row"><span class="stat-label">Wars / Alliances</span><span class="stat-val">${warCount} / ${allianceCount}</span></div>
       ${isPlayer
-        ? `<div class="stat-row"><span class="stat-label">Treasury</span><span class="stat-val">$${GAME.treasury}M</span></div>
-      <div class="stat-row"><span class="stat-label">Approval</span><span class="stat-val">${GAME.approval}%</span></div>`
+        ? `<div class="stat-row"><span class="stat-label">Approval</span><span class="stat-val">${GAME.approval}%</span></div>`
         : `<div class="stat-row"><span class="stat-label">Relation</span><span class="stat-val ${relation >= 0 ? 'positive' : 'negative'}">${relation >= 0 ? '+' : ''}${relation}</span></div>`}
     </div>
     ${(() => {
