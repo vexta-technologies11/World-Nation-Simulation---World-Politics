@@ -18,6 +18,11 @@ const MILITARY_ERAS = {
   ERA8: { name: "Futuristic",      techMin: 9.5, techMax: 10.0, label: "Futuristic" },
 };
 
+function safeNum(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 function getEraForTechLevel(techLevel) {
   const eras = Object.values(MILITARY_ERAS);
   for (let i = eras.length - 1; i >= 0; i--) {
@@ -774,6 +779,9 @@ function aiManageDefenseCompanies(nation) {
   if (nation.failedState) return;
   if (nation.aiDefenseCooldown === undefined) nation.aiDefenseCooldown = 0;
   if (nation.aiDefenseCooldown > 0) { nation.aiDefenseCooldown--; return; }
+
+  const warPressure = typeof getWarPressure === 'function' ? getWarPressure(nation.id || '') : 0;
+  const inHotWar = warPressure > 0.2;
   
   // Check owned companies count
   const owned = getNationDefenseCompanies(nation);
@@ -792,20 +800,34 @@ function aiManageDefenseCompanies(nation) {
   // Assign research focus for owned companies
   owned.forEach(company => {
     if (!company.researchFocus) {
-      const cats = ['fighter', 'tank', 'rifle', 'destroyer', 'missile', 'drone', 'submarine', 'artillery', 'helicopter', 'transport'];
+      const cats = inHotWar
+        ? ['tank', 'fighter', 'artillery', 'missile', 'drone', 'rifle', 'ifv', 'helicopter', 'submarine', 'destroyer', 'transport']
+        : ['fighter', 'tank', 'rifle', 'destroyer', 'missile', 'drone', 'submarine', 'artillery', 'helicopter', 'transport'];
       company.researchFocus = cats[Math.floor(Math.random() * cats.length)];
       company.researchProgress = 0;
     }
     
     // Process research
     processCompanyResearch(company, nation, false);
+
+    // During active wars, periodically retarget research toward combat essentials.
+    if (inHotWar && Math.random() < 0.2) {
+      const wartimeFocus = ['tank', 'fighter', 'artillery', 'missile', 'drone', 'rifle'];
+      company.researchFocus = wartimeFocus[Math.floor(Math.random() * wartimeFocus.length)];
+    }
     
     // Produce equipment if needed
-    if (Math.random() < 0.2 && company.equipment && company.equipment.length > 0) {
-      const toProduce = company.equipment.filter(e => (e.produced || 0) < 5);
+    const productionChance = clamp(0.2 + warPressure * 0.22, 0.2, 0.65);
+    if (Math.random() < productionChance && company.equipment && company.equipment.length > 0) {
+      const toProduce = company.equipment.filter(e => (e.produced || 0) < (inHotWar ? 12 : 5));
       if (toProduce.length > 0) {
-        const pick = toProduce[Math.floor(Math.random() * toProduce.length)];
-        _produceEquipInternal(company, pick.id, 1 + Math.floor(Math.random() * 3), nation, false);
+        const prioritized = inHotWar
+          ? toProduce.filter(e => ['tank', 'fighter', 'artillery', 'missile', 'drone', 'rifle', 'ifv'].includes(e.cat))
+          : toProduce;
+        const sourcePool = prioritized.length > 0 ? prioritized : toProduce;
+        const pick = sourcePool[Math.floor(Math.random() * sourcePool.length)];
+        const qty = inHotWar ? (2 + Math.floor(Math.random() * 4)) : (1 + Math.floor(Math.random() * 3));
+        _produceEquipInternal(company, pick.id, qty, nation, false);
       }
     }
   });
@@ -1005,7 +1027,8 @@ function renderMilitaryIndustrialTab() {
   
   if (companies.length > 0) {
     companies.forEach(company => {
-      const era = getEraForTechLevel(company.techLevel);
+      const companyTech = safeNum(company.techLevel);
+      const era = getEraForTechLevel(companyTech);
       const equipCount = company.equipment?.length || 0;
       html += `<div class="company-card">
         <div class="company-header">
@@ -1015,14 +1038,14 @@ function renderMilitaryIndustrialTab() {
         </div>
         <div class="company-desc">${company.desc}</div>
         <div class="company-stats">
-          <span>Tech: ${company.techLevel.toFixed(1)}</span>
+          <span>Tech: ${companyTech.toFixed(1)}</span>
           <span>Equipment: ${equipCount}</span>
           <span>Focus: ${company.researchFocus || 'None'}</span>
         </div>`;
       
       // Research progress bar
       if (company.researchFocus) {
-        const progressPct = clamp((company.researchProgress / (company.equipment?.length ? 15 : 10)) * 100, 0, 99);
+        const progressPct = clamp((safeNum(company.researchProgress) / (company.equipment?.length ? 15 : 10)) * 100, 0, 99);
         html += `<div class="research-bar-container">
           <span class="research-label">Researching ${company.researchFocus}:</span>
           <div class="research-bar-bg">
@@ -1091,13 +1114,16 @@ function renderMilitaryIndustrialTab() {
   const strength = computeNationMilitaryStrength(p);
   initNationMilitaryForces(p);
   const forces = p.militaryForces;
+  const basePower = safeNum(p.militaryPower) * 10;
+  const readiness = safeNum(forces.readiness);
+  const maintenance = safeNum(forces.maintenanceCost);
   
   html += '<div class="section-card"><h4>⚔ Military Power</h4>';
-  html += '<div class="strength-display">' + strength.toLocaleString() + '</div>';
+  html += '<div class="strength-display">' + Math.round(safeNum(strength)).toLocaleString() + '</div>';
   html += '<div class="strength-breakdown">';
-  html += '<div>Base Power: ' + (p.militaryPower * 10).toFixed(0) + '</div>';
-  html += '<div>Readiness: ' + forces.readiness.toFixed(1) + '%</div>';
-  html += '<div>Maintenance: $' + forces.maintenanceCost.toFixed(1) + 'M</div>';
+  html += '<div>Base Power: ' + basePower.toFixed(0) + '</div>';
+  html += '<div>Readiness: ' + readiness.toFixed(1) + '%</div>';
+  html += '<div>Maintenance: $' + maintenance.toFixed(1) + 'M</div>';
   html += '</div></div>';
   
   // Forces overview
@@ -1158,6 +1184,11 @@ function openForeignNationIntel(nationId) {
   const totalEquipTypes = Object.values(stockpile).reduce((sum, arr) => sum + arr.length, 0);
   
   let html = '<div class="tab-content">';
+  const militaryPower = safeNum(nation.militaryPower);
+  const techLevel = safeNum(nation.techLevel);
+  const gdpVal = safeNum(nation.gdp);
+  const populationVal = safeNum(nation.population);
+  const stabilityVal = safeNum(nation.stability);
   html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">';
   html += '<span style="font-size:36px">' + nation.flag + '</span>';
   html += '<div>';
@@ -1166,15 +1197,15 @@ function openForeignNationIntel(nationId) {
   html += '</div></div>';
 
   html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px">';
-  html += '<div class="resource-item"><span class="r-name">Military Power</span><span class="r-val" style="color:var(--accent-red)">' + nation.militaryPower.toFixed(1) + '</span></div>';
-  html += '<div class="resource-item"><span class="r-name">Total Strength</span><span class="r-val" style="color:var(--accent-green)">' + strength.toLocaleString() + '</span></div>';
-  html += '<div class="resource-item"><span class="r-name">Tech Level</span><span class="r-val" style="color:var(--accent-blue)">T' + nation.techLevel.toFixed(1) + '</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Military Power</span><span class="r-val" style="color:var(--accent-red)">' + militaryPower.toFixed(1) + '</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Total Strength</span><span class="r-val" style="color:var(--accent-green)">' + Math.round(safeNum(strength)).toLocaleString() + '</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Tech Level</span><span class="r-val" style="color:var(--accent-blue)">T' + techLevel.toFixed(1) + '</span></div>';
   html += '<div class="resource-item"><span class="r-name">Defense Companies</span><span class="r-val">' + companies.length + '</span></div>';
   html += '<div class="resource-item"><span class="r-name">Equipment Types</span><span class="r-val">' + totalEquipTypes + '</span></div>';
   html += '<div class="resource-item"><span class="r-name">Total Units</span><span class="r-val">' + totalItems + '</span></div>';
-  html += '<div class="resource-item"><span class="r-name">GDP</span><span class="r-val">$' + nation.gdp.toFixed(1) + 'T</span></div>';
-  html += '<div class="resource-item"><span class="r-name">Population</span><span class="r-val">' + Math.round(nation.population) + 'M</span></div>';
-  html += '<div class="resource-item"><span class="r-name">Stability</span><span class="r-val" style="color:' + (nation.stability >= 55 ? 'var(--accent-green)' : 'var(--accent-red)') + '">' + nation.stability.toFixed(1) + '</span></div>';
+  html += '<div class="resource-item"><span class="r-name">GDP</span><span class="r-val">$' + gdpVal.toFixed(1) + 'T</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Population</span><span class="r-val">' + Math.round(populationVal) + 'M</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Stability</span><span class="r-val" style="color:' + (stabilityVal >= 55 ? 'var(--accent-green)' : 'var(--accent-red)') + '">' + stabilityVal.toFixed(1) + '</span></div>';
   html += '</div>';
 
   // Defense companies section
@@ -1190,7 +1221,7 @@ function openForeignNationIntel(nationId) {
       html += '</div>';
       html += '<div class="company-desc">' + company.desc + '</div>';
       html += '<div class="company-stats">';
-      html += '<span>Tech: ' + company.techLevel.toFixed(1) + '</span>';
+      html += '<span>Tech: ' + safeNum(company.techLevel).toFixed(1) + '</span>';
       html += '<span>Focus: ' + (company.researchFocus || 'Idle') + '</span>';
       html += '<span>Equipment: ' + (company.equipment ? company.equipment.length : 0) + ' designs</span>';
       html += '</div>';
@@ -1237,20 +1268,34 @@ function openForeignNationIntel(nationId) {
   // Strategic assessment
   html += '<div class="section-card"><h4>📊 Strategic Assessment</h4>';
   html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:12px">';
-  html += '<div>Education: <strong>' + nation.education.toFixed(1) + '</strong></div>';
-  html += '<div>Governance: <strong>' + nation.governance.toFixed(1) + '</strong></div>';
-  html += '<div>Corruption: <strong style="color:' + (nation.corruption <= 38 ? 'var(--accent-green)' : 'var(--accent-red)') + '">' + nation.corruption.toFixed(1) + '</strong></div>';
-  html += '<div>Infrastructure: <strong>' + nation.infrastructure.toFixed(1) + '</strong></div>';
-  html += '<div>Happiness: <strong>' + nation.happiness.toFixed(1) + '</strong></div>';
-  html += '<div>Resilience: <strong>' + nation.resilience.toFixed(1) + '</strong></div>';
-  html += '<div>Health: <strong>' + nation.health.toFixed(1) + '</strong></div>';
-  html += '<div>Innovation Risk: <strong>' + nation.innovationRisk.toFixed(1) + '</strong></div>';
-  html += '<div>Environment: <strong>' + nation.environment.toFixed(1) + '</strong></div>';
-  html += '<div>Inflation: <strong>' + nation.inflation.toFixed(1) + '%</strong></div>';
-  html += '<div>Debt/GDP: <strong>' + nation.debtRatio.toFixed(1) + '%</strong></div>';
-  html += '<div>Religion: <strong>' + nation.religionInfluence.toFixed(1) + '</strong></div>';
-  html += '<div>Jobs: <strong style="color:' + (nation.jobs >= 55 ? 'var(--accent-green)' : 'var(--accent-red)') + '">' + nation.jobs.toFixed(1) + '</strong></div>';
-  html += '<div>Stock Index: <strong>' + nation.stockMarket.toFixed(1) + '</strong></div>';
+  const educationVal = safeNum(nation.education);
+  const governanceVal = safeNum(nation.governance);
+  const corruptionVal = safeNum(nation.corruption);
+  const infrastructureVal = safeNum(nation.infrastructure);
+  const happinessVal = safeNum(nation.happiness);
+  const resilienceVal = safeNum(nation.resilience);
+  const healthVal = safeNum(nation.health);
+  const innovationRiskVal = safeNum(nation.innovationRisk);
+  const environmentVal = safeNum(nation.environment);
+  const inflationVal = safeNum(nation.inflation);
+  const debtRatioVal = safeNum(nation.debtRatio);
+  const religionVal = safeNum(nation.religionInfluence);
+  const jobsVal = safeNum(nation.jobs);
+  const stockVal = safeNum(nation.stockMarket);
+  html += '<div>Education: <strong>' + educationVal.toFixed(1) + '</strong></div>';
+  html += '<div>Governance: <strong>' + governanceVal.toFixed(1) + '</strong></div>';
+  html += '<div>Corruption: <strong style="color:' + (corruptionVal <= 38 ? 'var(--accent-green)' : 'var(--accent-red)') + '">' + corruptionVal.toFixed(1) + '</strong></div>';
+  html += '<div>Infrastructure: <strong>' + infrastructureVal.toFixed(1) + '</strong></div>';
+  html += '<div>Happiness: <strong>' + happinessVal.toFixed(1) + '</strong></div>';
+  html += '<div>Resilience: <strong>' + resilienceVal.toFixed(1) + '</strong></div>';
+  html += '<div>Health: <strong>' + healthVal.toFixed(1) + '</strong></div>';
+  html += '<div>Innovation Risk: <strong>' + innovationRiskVal.toFixed(1) + '</strong></div>';
+  html += '<div>Environment: <strong>' + environmentVal.toFixed(1) + '</strong></div>';
+  html += '<div>Inflation: <strong>' + inflationVal.toFixed(1) + '%</strong></div>';
+  html += '<div>Debt/GDP: <strong>' + debtRatioVal.toFixed(1) + '%</strong></div>';
+  html += '<div>Religion: <strong>' + religionVal.toFixed(1) + '</strong></div>';
+  html += '<div>Jobs: <strong style="color:' + (jobsVal >= 55 ? 'var(--accent-green)' : 'var(--accent-red)') + '">' + jobsVal.toFixed(1) + '</strong></div>';
+  html += '<div>Stock Index: <strong>' + stockVal.toFixed(1) + '</strong></div>';
   html += '</div></div>';
 
   html += '</div>';
@@ -1659,7 +1704,7 @@ function processTechUpgradeSales(nation) {
   const neutrals = Object.values(NATIONS).filter(n =>
     !n.failedState && n.id !== nation.id &&
     !allyNations.find(a => a.id === n.id) &&
-    getRelation(n.id) > 10
+    (typeof getRelationBetween === 'function' ? getRelationBetween(nation.id, n.id) : getRelation(n.id)) > 10
   );
   
   const potentialBuyers = [...allyNations, ...neutrals].filter(n => 
@@ -1707,13 +1752,17 @@ function processTechUpgradeSales(nation) {
 function renderNationMilitaryForces(nation) {
   initNationMilitaryForces(nation);
   const forces = nation.militaryForces;
+  const activeDuty = safeNum(forces.activePersonnel);
+  const reserves = safeNum(forces.reservePersonnel);
+  const readiness = safeNum(forces.readiness);
+  const maintenance = safeNum(forces.maintenanceCost);
   
   let html = '<div class="section-card"><h4>👥 Personnel</h4>';
   html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">';
-  html += '<div class="resource-item"><span class="r-name">Active Duty</span><span class="r-val">' + Math.round(forces.activePersonnel * 1000).toLocaleString() + '</span></div>';
-  html += '<div class="resource-item"><span class="r-name">Reserves</span><span class="r-val">' + Math.round(forces.reservePersonnel * 1000).toLocaleString() + '</span></div>';
-  html += '<div class="resource-item"><span class="r-name">Readiness</span><span class="r-val" style="color:' + (forces.readiness >= 70 ? 'var(--accent-green)' : forces.readiness >= 40 ? 'var(--accent-yellow)' : 'var(--accent-red)') + '">' + forces.readiness.toFixed(1) + '%</span></div>';
-  html += '<div class="resource-item"><span class="r-name">Maintenance</span><span class="r-val" style="color:var(--accent-red)">$' + forces.maintenanceCost.toFixed(1) + 'M</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Active Duty</span><span class="r-val">' + Math.round(activeDuty * 1000).toLocaleString() + '</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Reserves</span><span class="r-val">' + Math.round(reserves * 1000).toLocaleString() + '</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Readiness</span><span class="r-val" style="color:' + (readiness >= 70 ? 'var(--accent-green)' : readiness >= 40 ? 'var(--accent-yellow)' : 'var(--accent-red)') + '">' + readiness.toFixed(1) + '%</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Maintenance</span><span class="r-val" style="color:var(--accent-red)">$' + maintenance.toFixed(1) + 'M</span></div>';
   html += '</div></div>';
   
   // Equipment by category
@@ -1878,7 +1927,7 @@ function processGlobalArmsMarket() {
       if (sellerCompanies.length === 0) return false;
       
       // Check relation
-      const rel = getRelation(seller.id);
+      const rel = (typeof getRelationBetween === 'function' ? getRelationBetween(buyerNation.id, seller.id) : getRelation(seller.id));
       const isAlly = GAME.alliances.some(a => 
         (a.a === buyerNation.id && a.b === seller.id) || 
         (a.b === buyerNation.id && a.a === seller.id)
@@ -2021,7 +2070,7 @@ function processTechUpgradeSalesWithPayment(nation) {
   const neutrals = Object.values(NATIONS).filter(n =>
     !n.failedState && n.id !== nation.id &&
     !allyNations.find(a => a.id === n.id) &&
-    getRelation(n.id) > 5
+    (typeof getRelationBetween === 'function' ? getRelationBetween(nation.id, n.id) : getRelation(n.id)) > 5
   );
   
   const potentialBuyers = [...allyNations, ...neutrals].filter(n => 
@@ -2146,7 +2195,7 @@ function renderArmsPurchaseUI() {
     if (seller.failedState || seller.id === p.id) return false;
     const sellerCompanies = getNationDefenseCompanies(seller);
     if (sellerCompanies.length === 0) return false;
-    const rel = getRelation(seller.id);
+    const rel = (typeof getRelationBetween === 'function' ? getRelationBetween(p.id, seller.id) : getRelation(seller.id));
     const isAlly = GAME.alliances.some(a => 
       (a.a === p.id && a.b === seller.id) || (a.b === p.id && a.a === seller.id)
     );

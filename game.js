@@ -80,6 +80,7 @@ const GAME = {
   activeTab: null,
   globalMarketIndex: 100,
   marketCrashTurns: 0,
+  bilateralRelations: {},
   alliances: [],
   conflicts: [],
 };
@@ -504,10 +505,6 @@ GAME.playerNation = {
   leaderTerm: '2025-2029',
 };
 
-// News items log
-const newsLog = [];
-let newsId = 0;
-
 // Events list for simulation
 const EVENTS_POOL = [
   { title: 'Economic recession fears grow globally', type: 'major', effect: { treasury: -50, approval: -3 } },
@@ -539,6 +536,23 @@ function getRelation(nationId) {
   return n.relation.base;
 }
 
+function getRelationBetween(aId, bId) {
+  if (!aId || !bId) return 0;
+  if (aId === bId) return 100;
+
+  const playerId = GAME.playerNation?.id;
+  if (aId === playerId) return getRelation(bId);
+  if (bId === playerId) return getRelation(aId);
+
+  const key = relationshipKey(aId, bId);
+  if (GAME.bilateralRelations[key] === undefined) {
+    const baseline = (hashCode(key) % 161) - 80;
+    GAME.bilateralRelations[key] = clamp(baseline, -100, 100);
+  }
+
+  return GAME.bilateralRelations[key];
+}
+
 function getRelationBadge(score) {
   if (score >= 20) return { text: '🤝 Friendly', cls: 'friendly' };
   if (score <= -20) return { text: '⚔️ Hostile', cls: 'hostile' };
@@ -547,7 +561,12 @@ function getRelationBadge(score) {
 
 function playerDeclareWar(targetId) {
   if (!targetId || targetId === GAME.playerNation.id) return;
-  declareConflict(GAME.playerNation.id, targetId, 'player declaration');
+  if (typeof declareWar === 'function') {
+    const success = declareWar(GAME.playerNation.id, targetId, 6, 'conquer');
+    if (!success) addNews(`🕊️ War declaration blocked (active truce, alliance, or existing conflict).`, 'minor');
+  } else {
+    declareConflict(GAME.playerNation.id, targetId, 'player declaration');
+  }
   renderNationCard();
   refreshRealtimeTabs();
 }
@@ -695,6 +714,10 @@ function syncPlayerNationFromRecord() {
   const record = getPlayerRecord();
   if (!record) return;
   ensureFiniteNationState(record);
+  const n = (value, fallback = 0) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
   GAME.playerNation = {
     ...GAME.playerNation,
     leader: record.leader,
@@ -740,13 +763,13 @@ function syncPlayerNationFromRecord() {
     traits: [...record.traits],
     happiness: record.happiness,
     resilience: record.resilience,
-    companies: record.companies || [],
-    industries: record.industries || {},
-    taxRevenue: record.taxRevenue || 0,
-    corporateEarnings: record.corporateEarnings || 0,
-    treasury: record.treasury || GAME.treasury,
-    informalEconomy: record.informalEconomy || 0,
-    taxCollected: record.taxCollected || 0,
+    companies: Array.isArray(record.companies) ? record.companies : [],
+    industries: (record.industries && typeof record.industries === 'object') ? record.industries : {},
+    taxRevenue: n(record.taxRevenue),
+    corporateEarnings: n(record.corporateEarnings),
+    treasury: n(record.treasury, n(GAME.treasury)),
+    informalEconomy: n(record.informalEconomy),
+    taxCollected: n(record.taxCollected),
   };
 }
 
@@ -758,7 +781,10 @@ function getWarPressure(nationId) {
   let pressure = 0;
   for (const conflict of GAME.conflicts) {
     if (conflict.a === nationId || conflict.b === nationId) {
-      pressure += 1 + (conflict.intensity / 120);
+      const intensity = Number.isFinite(conflict.intensity)
+        ? conflict.intensity
+        : (Number.isFinite(conflict.severity) ? conflict.severity * 10 : 40);
+      pressure += 1 + (intensity / 120);
     }
   }
   return pressure;
@@ -895,6 +921,8 @@ function processGlobalMarketCycle() {
   }
 
 function processAlliancesAndConflicts() {
+  const advancedWarEnabled = typeof processAllWars === 'function';
+
   // Form alliances among relatively stable states.
   for (let i = 0; i < 4; i++) {
     const a = pickRandomNationId();
@@ -916,77 +944,80 @@ function processAlliancesAndConflicts() {
     }
   }
 
-  // Trigger conflicts from aggressive or unstable states.
-  for (let i = 0; i < 5; i++) {
-    const attackerId = pickRandomNationId();
-    if (!attackerId) continue;
-    const attacker = NATIONS[attackerId];
-    if (attacker.failedState) continue;
+  // Legacy conflict generation/resolution is disabled when advanced war system is loaded.
+  if (!advancedWarEnabled) {
+    // Trigger conflicts from aggressive or unstable states.
+    for (let i = 0; i < 5; i++) {
+      const attackerId = pickRandomNationId();
+      if (!attackerId) continue;
+      const attacker = NATIONS[attackerId];
+      if (attacker.failedState) continue;
 
-    const targetId = pickRandomNationId([attackerId]);
-    if (!targetId) continue;
-    const target = NATIONS[targetId];
-    if (target.failedState || hasAlliance(attackerId, targetId) || hasConflict(attackerId, targetId)) continue;
+      const targetId = pickRandomNationId([attackerId]);
+      if (!targetId) continue;
+      const target = NATIONS[targetId];
+      if (target.failedState || hasAlliance(attackerId, targetId) || hasConflict(attackerId, targetId)) continue;
 
-    const aggression = (
-      (attacker.militaryPower - target.militaryPower) * 0.004 +
-      (45 - attacker.resources) * 0.003 +
-      (attacker.corruption - 35) * 0.002 +
-      (attacker.inCrisis ? 0.04 : 0) +
-      (attacker.failedState ? 0.06 : 0)
-    );
+      const aggression = (
+        (attacker.militaryPower - target.militaryPower) * 0.004 +
+        (45 - attacker.resources) * 0.003 +
+        (attacker.corruption - 35) * 0.002 +
+        (attacker.inCrisis ? 0.04 : 0) +
+        (attacker.failedState ? 0.06 : 0)
+      );
 
-    if (Math.random() < Math.max(0.01, aggression)) {
-      declareConflict(attackerId, targetId, attacker.resources < 40 ? 'resource raid' : 'regional rivalry');
-    }
-  }
-
-  // Resolve ongoing conflicts and apply war economics.
-  const nextConflicts = [];
-  for (const conflict of GAME.conflicts) {
-    const a = NATIONS[conflict.a];
-    const b = NATIONS[conflict.b];
-    if (!a || !b || a.failedState || b.failedState) continue;
-
-    conflict.duration += 1;
-    const powerA = a.militaryPower * (0.6 + a.stability / 150) * (0.7 + a.resources / 140);
-    const powerB = b.militaryPower * (0.6 + b.stability / 150) * (0.7 + b.resources / 140);
-    const totalPower = Math.max(1, powerA + powerB);
-
-    const warDamageA = (conflict.intensity / 100) * (0.05 + powerB / totalPower * 0.12);
-    const warDamageB = (conflict.intensity / 100) * (0.05 + powerA / totalPower * 0.12);
-
-    a.gdp = clamp(a.gdp - warDamageA, 0.05, 220);
-    b.gdp = clamp(b.gdp - warDamageB, 0.05, 220);
-    a.population = clamp(a.population - warDamageA * 0.9, 1, 1800);
-    b.population = clamp(b.population - warDamageB * 0.9, 1, 1800);
-    a.stability = clamp(a.stability - warDamageA * 2.4, 1, 100);
-    b.stability = clamp(b.stability - warDamageB * 2.4, 1, 100);
-    a.migrationPressure = clamp(a.migrationPressure + warDamageA * 3.3, 1, 100);
-    b.migrationPressure = clamp(b.migrationPressure + warDamageB * 3.3, 1, 100);
-    a.jobs = clamp(a.jobs - warDamageA * 2.4, 1, 100);
-    b.jobs = clamp(b.jobs - warDamageB * 2.4, 1, 100);
-    a.atrocityRisk = clamp(a.atrocityRisk + conflict.intensity * 0.015, 0, 100);
-    b.atrocityRisk = clamp(b.atrocityRisk + conflict.intensity * 0.015, 0, 100);
-
-    const winner = (powerA + (Math.random() - 0.5) * 18) >= (powerB + (Math.random() - 0.5) * 18) ? a : b;
-    const loser = winner === a ? b : a;
-    const loot = clamp(loser.resources * 0.06, 0, 6);
-    winner.resources = clamp(winner.resources + loot, 1, 100);
-    loser.resources = clamp(loser.resources - loot, 1, 100);
-    loser.deficit = clamp(loser.deficit + 0.35, -12, 35);
-    winner.stockMarket = clamp(winner.stockMarket + 0.8, 15, 240);
-    loser.stockMarket = clamp(loser.stockMarket - 1.8, 15, 240);
-
-    const endChance = clamp(0.08 + conflict.duration * 0.025 + Math.abs(powerA - powerB) / totalPower * 0.2, 0.08, 0.75);
-    if (Math.random() < endChance) {
-      addNews(`🕊️ ${a.name} and ${b.name} agree to a ceasefire after ${conflict.duration} months`, 'minor');
-      continue;
+      if (Math.random() < Math.max(0.01, aggression)) {
+        declareConflict(attackerId, targetId, attacker.resources < 40 ? 'resource raid' : 'regional rivalry');
+      }
     }
 
-    nextConflicts.push(conflict);
+    // Resolve ongoing conflicts and apply war economics.
+    const nextConflicts = [];
+    for (const conflict of GAME.conflicts) {
+      const a = NATIONS[conflict.a];
+      const b = NATIONS[conflict.b];
+      if (!a || !b || a.failedState || b.failedState) continue;
+
+      conflict.duration += 1;
+      const powerA = a.militaryPower * (0.6 + a.stability / 150) * (0.7 + a.resources / 140);
+      const powerB = b.militaryPower * (0.6 + b.stability / 150) * (0.7 + b.resources / 140);
+      const totalPower = Math.max(1, powerA + powerB);
+
+      const warDamageA = (conflict.intensity / 100) * (0.05 + powerB / totalPower * 0.12);
+      const warDamageB = (conflict.intensity / 100) * (0.05 + powerA / totalPower * 0.12);
+
+      a.gdp = clamp(a.gdp - warDamageA, 0.05, 220);
+      b.gdp = clamp(b.gdp - warDamageB, 0.05, 220);
+      a.population = clamp(a.population - warDamageA * 0.9, 1, 1800);
+      b.population = clamp(b.population - warDamageB * 0.9, 1, 1800);
+      a.stability = clamp(a.stability - warDamageA * 2.4, 1, 100);
+      b.stability = clamp(b.stability - warDamageB * 2.4, 1, 100);
+      a.migrationPressure = clamp(a.migrationPressure + warDamageA * 3.3, 1, 100);
+      b.migrationPressure = clamp(b.migrationPressure + warDamageB * 3.3, 1, 100);
+      a.jobs = clamp(a.jobs - warDamageA * 2.4, 1, 100);
+      b.jobs = clamp(b.jobs - warDamageB * 2.4, 1, 100);
+      a.atrocityRisk = clamp(a.atrocityRisk + conflict.intensity * 0.015, 0, 100);
+      b.atrocityRisk = clamp(b.atrocityRisk + conflict.intensity * 0.015, 0, 100);
+
+      const winner = (powerA + (Math.random() - 0.5) * 18) >= (powerB + (Math.random() - 0.5) * 18) ? a : b;
+      const loser = winner === a ? b : a;
+      const loot = clamp(loser.resources * 0.06, 0, 6);
+      winner.resources = clamp(winner.resources + loot, 1, 100);
+      loser.resources = clamp(loser.resources - loot, 1, 100);
+      loser.deficit = clamp(loser.deficit + 0.35, -12, 35);
+      winner.stockMarket = clamp(winner.stockMarket + 0.8, 15, 240);
+      loser.stockMarket = clamp(loser.stockMarket - 1.8, 15, 240);
+
+      const endChance = clamp(0.08 + conflict.duration * 0.025 + Math.abs(powerA - powerB) / totalPower * 0.2, 0.08, 0.75);
+      if (Math.random() < endChance) {
+        addNews(`🕊️ ${a.name} and ${b.name} agree to a ceasefire after ${conflict.duration} months`, 'minor');
+        continue;
+      }
+
+      nextConflicts.push(conflict);
+    }
+    GAME.conflicts = nextConflicts;
   }
-  GAME.conflicts = nextConflicts;
 
   // Alliance economic spillover.
   GAME.alliances = GAME.alliances.filter(alliance => {
@@ -2848,23 +2879,6 @@ function updateHUD() {
   dom.turnVal.textContent = GAME.turn;
 }
 
-// ============================================================
-// NEWS SYSTEM
-// ============================================================
-function addNews(title, type = 'minor') {
-  const item = { id: ++newsId, title, type, turn: GAME.turn };
-  newsLog.unshift(item);
-  if (newsLog.length > 50) newsLog.length = 50;
-  renderNews();
-}
-
-function renderNews() {
-  dom.newsTicker.innerHTML = newsLog.map(n =>
-    `<div class="news-item ${n.type}">${n.title}</div>`
-  ).join('');
-  dom.newsCount.textContent = newsLog.length;
-}
-
 // ── AI TECH TRADING ────────────────────────────────────
 function processTechTrading() {
   // Gather nations with techs to sell (must have at least 5 discovered and willing)
@@ -2923,6 +2937,12 @@ function simulateTurn() {
   GAME.turn++;
   GAME.date.setMonth(GAME.date.getMonth() + 1);
 
+  // DEBUG: Check state before economic processing
+  const debugBefore = {
+    playerCompanyCount: (NATIONS[GAME.playerNation.id]?.companies?.length || 0),
+    playerGDP: NATIONS[GAME.playerNation.id]?.gdp || 0,
+  };
+
   processGlobalMarketCycle();
 
   // Random event
@@ -2959,6 +2979,10 @@ function simulateTurn() {
   processAlliancesAndConflicts();
   processAllianceLending();
 
+  // ── GEOPOLITICAL WAR SYSTEM ──────────────────────────────
+  if (typeof processAIWarDecisions === 'function') processAIWarDecisions();
+  if (typeof processAllWars === 'function') processAllWars();
+
   // ── DEFENSE INDUSTRY PROCESSING ────────────────────────────
   processAllDefenseCompanies();
 
@@ -2971,6 +2995,15 @@ function simulateTurn() {
 
   // ── ECONOMIC SYSTEMS ──────────────────────────────────────
   processAllEconomicSystems();
+
+  // DEBUG: Check state after economic processing
+  const debugAfter = {
+    playerCompanyCount: (NATIONS[GAME.playerNation.id]?.companies?.length || 0),
+    playerGDP: NATIONS[GAME.playerNation.id]?.gdp || 0,
+  };
+  if (GAME.turn % 5 === 0) {
+    console.log(`[Turn ${GAME.turn}] Companies: ${debugBefore.playerCompanyCount} → ${debugAfter.playerCompanyCount} | GDP: ${debugBefore.playerGDP.toFixed(2)}T → ${debugAfter.playerGDP.toFixed(2)}T`);
+  }
 
   // ── AI TECH TRADING ────────────────────────────────────
   // AI nations with high research and discovered techs sell to weaker nations
@@ -3689,8 +3722,14 @@ function formatMoney(val) {
 // NATION CARD (Left Sidebar)
 // ============================================================
 function renderNationCard() {
+  if (!GAME.selectedNation) syncPlayerNationFromRecord();
   const selected = GAME.selectedNation ? NATIONS[GAME.selectedNation] : null;
   const p = selected || GAME.playerNation;
+  const sourceNation = (!selected && typeof getPlayerRecord === 'function') ? (getPlayerRecord() || p) : p;
+  const num = (value, fallback = 0) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
   const isPlayer = p.id === GAME.playerNation.id;
   const budget = isPlayer ? GAME.budget : (p.aiBudget || doctrineBaseBudget('balanced'));
   const relation = isPlayer ? null : getRelation(p.id);
@@ -3698,6 +3737,70 @@ function renderNationCard() {
   const warCount = GAME.conflicts.filter(c => c.a === p.id || c.b === p.id).length;
   const allianceCount = GAME.alliances.filter(a => a.a === p.id || a.b === p.id).length;
   const statusTag = p.failedState ? '💥 Failed State' : (p.inCrisis ? '🚨 In Crisis' : '✅ Stable');
+  if (typeof initNationResources === 'function') initNationResources(sourceNation);
+  const resourceData = sourceNation.resourceData || {};
+  const oilLevel = resourceData.oil?.level;
+  const mineralsLevel = resourceData.minerals?.level;
+  const rareEarthLevel = resourceData.rareEarth?.level;
+  const totals = Object.values(resourceData).reduce((acc, r) => {
+    acc.produced += Number(r?.produced || 0);
+    acc.consumed += Number(r?.consumed || 0);
+    return acc;
+  }, { produced: 0, consumed: 0 });
+  const supplyBalance = totals.produced - totals.consumed;
+  const supplyState = supplyBalance >= 0 ? 'Surplus' : 'Deficit';
+  const activeConflict = GAME.conflicts.find(c => c.a === p.id || c.b === p.id);
+  const conflictPhase = activeConflict ? (activeConflict.phase || 'active') : 'peace';
+  const conflictSeverity = activeConflict ? (activeConflict.severity || Math.round((activeConflict.intensity || 40) / 10)) : 0;
+  const conflictExhaustion = activeConflict
+    ? (activeConflict.a === p.id ? activeConflict.aExhaustion : activeConflict.bExhaustion)
+    : null;
+  const generalCount = Array.isArray(p.generals) ? p.generals.filter(g => g?.isAlive !== false).length : 0;
+  const budgetMilitary = Math.round(num(budget.military));
+  const budgetEconomy = Math.round(num(budget.economy));
+  const budgetDiplomacy = Math.round(num(budget.diplomacy));
+  const budgetIntel = Math.round(num(budget.intelligence));
+  const budgetSpace = Math.round(num(budget.space));
+  const budgetSocial = Math.round(num(budget.social));
+  const gdpVal = num(sourceNation.gdp);
+  const treasuryVal = num(sourceNation.treasury, num(GAME.treasury));
+  const taxRevenueVal = num(sourceNation.taxRevenue);
+  const corporateEarningsVal = num(sourceNation.corporateEarnings);
+  const informalEconomyVal = num(sourceNation.informalEconomy);
+  const populationVal = num(p.population);
+  const militaryPowerVal = clamp(num(p.militaryPower), 0, 100);
+  const techLevelVal = num(p.techLevel);
+  const healthVal = num(p.health);
+  const stabilityVal = num(p.stability);
+  const environmentVal = num(p.environment);
+  const resourcesVal = num(sourceNation.resources);
+  const energySecurityVal = num(sourceNation.energySecurity);
+  const inflationVal = num(p.inflation);
+  const debtRatioVal = num(p.debtRatio);
+  const factoriesVal = num(p.factories);
+  const jobsVal = num(p.jobs);
+  const religionInfluenceVal = num(p.religionInfluence);
+  const stockMarketVal = num(p.stockMarket);
+  const corruptionVal = num(p.corruption);
+  const deficitVal = num(p.deficit);
+  const innovationRiskVal = num(p.innovationRisk);
+  const atrocityRiskVal = num(p.atrocityRisk);
+  const recessionMonthsVal = num(p.recessionMonths);
+  const crisisRiskVal = num(p.crisisRisk);
+  const decisionQualityVal = num(p.decisionQuality);
+  const happinessVal = num(p.happiness);
+  const resilienceVal = num(p.resilience);
+  const conflictExhaustionVal = conflictExhaustion == null ? null : num(conflictExhaustion);
+  const localStockSnapshot = typeof getNationStockMarketSnapshot === 'function'
+    ? getNationStockMarketSnapshot(sourceNation)
+    : { listed: 0, marketCap: 0, topGainer: null, topLoser: null };
+  const formatMarketMoneyCard = (amountM) => {
+    const v = Number(amountM || 0);
+    if (!Number.isFinite(v)) return '$0M';
+    if (v >= 1000000) return '$' + (v / 1000000).toFixed(2) + 'T';
+    if (v >= 1000) return '$' + (v / 1000).toFixed(2) + 'B';
+    return '$' + v.toFixed(1) + 'M';
+  };
   const card = $('#nationCard');
   card.innerHTML = `
     <div class="nation-flag">${p.flag}</div>
@@ -3706,40 +3809,50 @@ function renderNationCard() {
     <div class="nation-stats">
       <div class="stat-row"><span class="stat-label">Government</span><span class="stat-val">${getGovernmentLabel(p.governmentStyle)}</span></div>
       <div class="stat-row"><span class="stat-label">Doctrine</span><span class="stat-val">${getDoctrineLabel(p.policyDoctrine)}</span></div>
-      <div class="stat-row"><span class="stat-label">Budget: Military</span><span class="stat-val">${Math.round(budget.military)}%</span></div>
-      <div class="stat-row"><span class="stat-label">Budget: Economy</span><span class="stat-val">${Math.round(budget.economy)}%</span></div>
-      <div class="stat-row"><span class="stat-label">Budget: Diplomacy</span><span class="stat-val">${Math.round(budget.diplomacy)}%</span></div>
-      <div class="stat-row"><span class="stat-label">Budget: Intel</span><span class="stat-val">${Math.round(budget.intelligence)}%</span></div>
-      <div class="stat-row"><span class="stat-label">Budget: Space</span><span class="stat-val">${Math.round(budget.space)}%</span></div>
-      <div class="stat-row"><span class="stat-label">Budget: Social</span><span class="stat-val">${Math.round(budget.social)}%</span></div>
-      <div class="stat-row"><span class="stat-label">GDP</span><span class="stat-val">$${p.gdp.toFixed(1)}T</span></div>
-      <div class="stat-row"><span class="stat-label">Treasury</span><span class="stat-val" style="color:var(--accent-yellow)">${formatMoney(p.treasury || 0)}</span></div>
-      <div class="stat-row"><span class="stat-label">Tax Revenue</span><span class="stat-val" style="color:var(--accent-green)">${formatMoney(Math.round(p.taxRevenue || 0))}/m</span></div>
-      <div class="stat-row"><span class="stat-label">Corporate Earnings</span><span class="stat-val" style="color:var(--accent-blue)">${formatMoney(p.corporateEarnings || 0)}</span></div>
-      <div class="stat-row"><span class="stat-label">Informal Economy</span><span class="stat-val ${(p.informalEconomy || 0) > 30 ? 'negative' : 'positive'}">${(p.informalEconomy || 0).toFixed(1)}%</span></div>
-      <div class="stat-row"><span class="stat-label">Companies</span><span class="stat-val">${(p.companies || []).length}</span></div>
-      <div class="stat-row"><span class="stat-label">Population</span><span class="stat-val">${Math.round(p.population)}M</span></div>
-      <div class="stat-row"><span class="stat-label">Military</span><span class="stat-val"><span class="bar-fill" style="width:${Math.round(p.militaryPower)}%">${Math.round(p.militaryPower)}</span></span></div>
-      <div class="stat-row"><span class="stat-label">Tech Avg</span><span class="stat-val">T${p.techLevel.toFixed(1)}</span></div>
+      <div class="stat-row"><span class="stat-label">Budget: Military</span><span class="stat-val">${budgetMilitary}%</span></div>
+      <div class="stat-row"><span class="stat-label">Budget: Economy</span><span class="stat-val">${budgetEconomy}%</span></div>
+      <div class="stat-row"><span class="stat-label">Budget: Diplomacy</span><span class="stat-val">${budgetDiplomacy}%</span></div>
+      <div class="stat-row"><span class="stat-label">Budget: Intel</span><span class="stat-val">${budgetIntel}%</span></div>
+      <div class="stat-row"><span class="stat-label">Budget: Space</span><span class="stat-val">${budgetSpace}%</span></div>
+      <div class="stat-row"><span class="stat-label">Budget: Social</span><span class="stat-val">${budgetSocial}%</span></div>
+      <div class="stat-row"><span class="stat-label">GDP</span><span class="stat-val">$${gdpVal.toFixed(1)}T</span></div>
+      <div class="stat-row"><span class="stat-label">Treasury</span><span class="stat-val" style="color:var(--accent-yellow)">${formatMoney(treasuryVal)}</span></div>
+      <div class="stat-row"><span class="stat-label">Tax Revenue</span><span class="stat-val" style="color:var(--accent-green)">${formatMoney(Math.round(taxRevenueVal))}/m</span></div>
+      <div class="stat-row"><span class="stat-label">Corporate Earnings</span><span class="stat-val" style="color:var(--accent-blue)">${formatMoney(corporateEarningsVal)}</span></div>
+      <div class="stat-row"><span class="stat-label">Informal Economy</span><span class="stat-val ${informalEconomyVal > 30 ? 'negative' : 'positive'}">${informalEconomyVal.toFixed(1)}%</span></div>
+      <div class="stat-row"><span class="stat-label">Companies</span><span class="stat-val">${(sourceNation.companies || []).length}</span></div>
+      <div class="stat-row"><span class="stat-label">Population</span><span class="stat-val">${Math.round(populationVal)}M</span></div>
+      <div class="stat-row"><span class="stat-label">Military</span><span class="stat-val"><span class="bar-fill" style="width:${Math.round(militaryPowerVal)}%">${Math.round(militaryPowerVal)}</span></span></div>
+      <div class="stat-row"><span class="stat-label">Tech Avg</span><span class="stat-val">T${techLevelVal.toFixed(1)}</span></div>
       <div class="stat-row"><span class="stat-label">Technologies</span><span class="stat-val" style="color:var(--accent-blue)">${countNationTechs(p)}</span></div>
-      <div class="stat-row"><span class="stat-label">Health</span><span class="stat-val">${p.health.toFixed(1)}</span></div>
-      <div class="stat-row"><span class="stat-label">Stability</span><span class="stat-val">${p.stability.toFixed(1)}</span></div>
-      <div class="stat-row"><span class="stat-label">Environment</span><span class="stat-val">${p.environment.toFixed(1)}</span></div>
-      <div class="stat-row"><span class="stat-label">Inflation</span><span class="stat-val">${p.inflation.toFixed(1)}%</span></div>
-      <div class="stat-row"><span class="stat-label">Debt/GDP</span><span class="stat-val">${p.debtRatio.toFixed(1)}%</span></div>
-      <div class="stat-row"><span class="stat-label">Factories</span><span class="stat-val">${p.factories.toFixed(1)}</span></div>
-      <div class="stat-row"><span class="stat-label">Jobs</span><span class="stat-val ${p.jobs >= 55 ? 'positive' : 'negative'}">${p.jobs.toFixed(1)}</span></div>
-      <div class="stat-row"><span class="stat-label">Religiosity</span><span class="stat-val ${p.religionInfluence <= 60 ? 'positive' : 'negative'}">${p.religionInfluence.toFixed(1)}</span></div>
-      <div class="stat-row"><span class="stat-label">Stock Index</span><span class="stat-val">${p.stockMarket.toFixed(1)}</span></div>
-      <div class="stat-row"><span class="stat-label">Corruption</span><span class="stat-val ${p.corruption <= 38 ? 'positive' : 'negative'}">${p.corruption.toFixed(1)}</span></div>
-      <div class="stat-row"><span class="stat-label">Deficit</span><span class="stat-val ${p.deficit <= 4 ? 'positive' : 'negative'}">${p.deficit.toFixed(1)}%</span></div>
-      <div class="stat-row"><span class="stat-label">Innovation Risk</span><span class="stat-val ${p.innovationRisk <= 45 ? 'positive' : 'negative'}">${p.innovationRisk.toFixed(1)}</span></div>
-      <div class="stat-row"><span class="stat-label">Atrocity Risk</span><span class="stat-val ${p.atrocityRisk <= 20 ? 'positive' : 'negative'}">${p.atrocityRisk.toFixed(1)}</span></div>
-      <div class="stat-row"><span class="stat-label">Recession</span><span class="stat-val">${Math.round(p.recessionMonths)}m</span></div>
-      <div class="stat-row"><span class="stat-label">Crisis Risk</span><span class="stat-val ${p.crisisRisk <= 45 ? 'positive' : 'negative'}">${p.crisisRisk.toFixed(1)}</span></div>
-      <div class="stat-row"><span class="stat-label">State AI</span><span class="stat-val">${p.decisionQuality.toFixed(1)}</span></div>
-      <div class="stat-row"><span class="stat-label">Happiness</span><span class="stat-val">${p.happiness.toFixed(1)}</span></div>
-      <div class="stat-row"><span class="stat-label">Resilience</span><span class="stat-val">${p.resilience.toFixed(1)}</span></div>
+      <div class="stat-row"><span class="stat-label">Health</span><span class="stat-val">${healthVal.toFixed(1)}</span></div>
+      <div class="stat-row"><span class="stat-label">Stability</span><span class="stat-val">${stabilityVal.toFixed(1)}</span></div>
+      <div class="stat-row"><span class="stat-label">Environment</span><span class="stat-val">${environmentVal.toFixed(1)}</span></div>
+      <div class="stat-row"><span class="stat-label">Resources</span><span class="stat-val">${resourcesVal.toFixed(1)}</span></div>
+      <div class="stat-row"><span class="stat-label">Energy Security</span><span class="stat-val">${energySecurityVal.toFixed(1)}</span></div>
+      <div class="stat-row"><span class="stat-label">Oil / Minerals / RareEarth</span><span class="stat-val">${Number.isFinite(oilLevel) ? oilLevel.toFixed(1) : '-'} / ${Number.isFinite(mineralsLevel) ? mineralsLevel.toFixed(1) : '-'} / ${Number.isFinite(rareEarthLevel) ? rareEarthLevel.toFixed(1) : '-'}</span></div>
+      <div class="stat-row"><span class="stat-label">Supply Chain</span><span class="stat-val ${supplyBalance >= 0 ? 'positive' : 'negative'}">${supplyState} (${Math.round(supplyBalance)}M)</span></div>
+      <div class="stat-row"><span class="stat-label">Inflation</span><span class="stat-val">${inflationVal.toFixed(1)}%</span></div>
+      <div class="stat-row"><span class="stat-label">Debt/GDP</span><span class="stat-val">${debtRatioVal.toFixed(1)}%</span></div>
+      <div class="stat-row"><span class="stat-label">Factories</span><span class="stat-val">${factoriesVal.toFixed(1)}</span></div>
+      <div class="stat-row"><span class="stat-label">Jobs</span><span class="stat-val ${jobsVal >= 55 ? 'positive' : 'negative'}">${jobsVal.toFixed(1)}</span></div>
+      <div class="stat-row"><span class="stat-label">Religiosity</span><span class="stat-val ${religionInfluenceVal <= 60 ? 'positive' : 'negative'}">${religionInfluenceVal.toFixed(1)}</span></div>
+      <div class="stat-row"><span class="stat-label">Stock Index</span><span class="stat-val">${stockMarketVal.toFixed(1)}</span></div>
+      <div class="stat-row"><span class="stat-label">Local Listed</span><span class="stat-val">${Math.round(num(localStockSnapshot.listed))}</span></div>
+      <div class="stat-row"><span class="stat-label">Local Market Cap</span><span class="stat-val" style="color:var(--accent-blue)">${formatMarketMoneyCard(localStockSnapshot.marketCap)}</span></div>
+      <div class="stat-row"><span class="stat-label">Corruption</span><span class="stat-val ${corruptionVal <= 38 ? 'positive' : 'negative'}">${corruptionVal.toFixed(1)}</span></div>
+      <div class="stat-row"><span class="stat-label">Deficit</span><span class="stat-val ${deficitVal <= 4 ? 'positive' : 'negative'}">${deficitVal.toFixed(1)}%</span></div>
+      <div class="stat-row"><span class="stat-label">Innovation Risk</span><span class="stat-val ${innovationRiskVal <= 45 ? 'positive' : 'negative'}">${innovationRiskVal.toFixed(1)}</span></div>
+      <div class="stat-row"><span class="stat-label">Atrocity Risk</span><span class="stat-val ${atrocityRiskVal <= 20 ? 'positive' : 'negative'}">${atrocityRiskVal.toFixed(1)}</span></div>
+      <div class="stat-row"><span class="stat-label">Recession</span><span class="stat-val">${Math.round(recessionMonthsVal)}m</span></div>
+      <div class="stat-row"><span class="stat-label">Crisis Risk</span><span class="stat-val ${crisisRiskVal <= 45 ? 'positive' : 'negative'}">${crisisRiskVal.toFixed(1)}</span></div>
+      <div class="stat-row"><span class="stat-label">State AI</span><span class="stat-val">${decisionQualityVal.toFixed(1)}</span></div>
+      <div class="stat-row"><span class="stat-label">Generals</span><span class="stat-val">${generalCount}</span></div>
+      <div class="stat-row"><span class="stat-label">Happiness</span><span class="stat-val">${happinessVal.toFixed(1)}</span></div>
+      <div class="stat-row"><span class="stat-label">Resilience</span><span class="stat-val">${resilienceVal.toFixed(1)}</span></div>
+      <div class="stat-row"><span class="stat-label">War Phase</span><span class="stat-val ${conflictPhase === 'peace' ? 'positive' : 'negative'}">${conflictPhase}</span></div>
+      <div class="stat-row"><span class="stat-label">War Severity</span><span class="stat-val">${conflictSeverity}</span></div>
+      <div class="stat-row"><span class="stat-label">War Exhaustion</span><span class="stat-val ${(conflictExhaustionVal || 0) > 55 ? 'negative' : 'positive'}">${conflictExhaustionVal == null ? '-' : conflictExhaustionVal.toFixed(1)}</span></div>
       <div class="stat-row"><span class="stat-label">Status</span><span class="stat-val">${statusTag}</span></div>
       <div class="stat-row"><span class="stat-label">Wars / Alliances</span><span class="stat-val">${warCount} / ${allianceCount}</span></div>
       ${isPlayer
@@ -3747,17 +3860,29 @@ function renderNationCard() {
         : `<div class="stat-row"><span class="stat-label">Relation</span><span class="stat-val ${relation >= 0 ? 'positive' : 'negative'}">${relation >= 0 ? '+' : ''}${relation}</span></div>`}
     </div>
     ${(() => {
-      const comps = p.companies || [];
+      const comps = sourceNation.companies || [];
       if (comps.length === 0) return '';
-      const top = comps.slice().sort((a,b) => b.revenue - a.revenue).slice(0, 10);
+      const top = comps.slice().sort((a,b) => {
+        const aw = Number(a.worth || (Number(a.revenue || 0) * Number(a.profitMargin || 0) * 20));
+        const bw = Number(b.worth || (Number(b.revenue || 0) * Number(b.profitMargin || 0) * 20));
+        return bw - aw;
+      }).slice(0, 10);
       let h = '<div class="section-card" style="margin:8px 0;padding:6px 8px;font-size:11px"><div style="font-weight:600;font-size:12px;margin-bottom:4px">🏢 Companies (' + comps.length + ')</div>';
       top.forEach((c, i) => {
         const sectorIcon = ({agriculture:'🌾',manufacturing:'🏭',energy:'⚡',technology:'💻',services:'🏦',tourism:'✈️'})[c.sector] || '🏢';
+        const profit = Number(c.revenue || 0) * Number(c.profitMargin || 0);
+        const worth = Number(c.worth || Math.max(0, profit * 20));
         h += '<div style="display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid rgba(84,140,196,0.1)">';
-        h += '<span>' + sectorIcon + ' ' + c.name + '</span>';
-        h += '<span style="color:var(--accent-green);font-weight:600">$' + c.revenue.toFixed(1) + 'M</span>';
+        h += '<span>' + sectorIcon + ' ' + c.name + ' <span style="color:var(--accent-blue)">T' + Math.round(num(c.techTier, 1)) + '</span></span>';
+        h += '<span style="color:var(--accent-green);font-weight:600">Rev ' + formatMarketMoneyCard(c.revenue) + ' | Pft ' + formatMarketMoneyCard(profit) + ' | Worth ' + formatMarketMoneyCard(worth) + '</span>';
         h += '</div>';
       });
+      if (localStockSnapshot.topGainer) {
+        h += '<div style="padding-top:4px;color:var(--accent-green)">📈 Best Listed: ' + localStockSnapshot.topGainer.name + ' +' + num(localStockSnapshot.topGainer.stockChangePct).toFixed(2) + '%</div>';
+      }
+      if (localStockSnapshot.topLoser) {
+        h += '<div style="padding-top:2px;color:var(--accent-red)">📉 Worst Listed: ' + localStockSnapshot.topLoser.name + ' ' + num(localStockSnapshot.topLoser.stockChangePct).toFixed(2) + '%</div>';
+      }
       h += '</div>';
       return h;
     })()}
@@ -3803,10 +3928,12 @@ function setupTabs() {
 const TAB_NAMES = {
   gov: '🏛️ Government',
   econ: '💰 Economy',
+  news: '📰 World News',
   society: '👥 Society',
   environment: '🌍 Environment',
   finance: '🏦 Finance',
   mil: '⚔️ Military',
+  conflict: '⚔️ Conflicts',
   diplo: '🤝 Diplomacy',
   intel: '🕵️ Intelligence',
   space: '🚀 Space Program',
@@ -3837,7 +3964,7 @@ function refreshRealtimeTabs() {
   if (dom.tabOverlay.classList.contains('hidden')) return;
 
   // Keep high-churn analytics tabs live while simulation runs.
-  if (GAME.activeTab === 'history' || GAME.activeTab === 'leaderboard') {
+  if (GAME.activeTab === 'history' || GAME.activeTab === 'leaderboard' || GAME.activeTab === 'econ' || GAME.activeTab === 'finance' || GAME.activeTab === 'intel' || GAME.activeTab === 'news') {
     renderTabContent(GAME.activeTab);
   }
 }
@@ -3853,6 +3980,14 @@ function renderTabContent(tab) {
       content.innerHTML = renderEconomyTab();
       attachBudgetListeners();
       break;
+    case 'news':
+      content.innerHTML = renderWorldNewsTab();
+      if (typeof attachNewsBrowserListeners === 'function') {
+        attachNewsBrowserListeners(content);
+      } else if (typeof attachNewsCenterListeners === 'function') {
+        attachNewsCenterListeners(content);
+      }
+      break;
     case 'society':
       content.innerHTML = renderSocietyTab();
       break;
@@ -3865,12 +4000,18 @@ function renderTabContent(tab) {
     case 'mil':
       content.innerHTML = renderMilitaryIndustrialTab();
       break;
+    case 'conflict':
+      content.innerHTML = renderConflictsTab();
+      break;
     case 'diplo':
       content.innerHTML = renderDiplomacyTab();
       attachDiplomacyListeners();
       break;
     case 'intel':
       content.innerHTML = renderIntelTab();
+      if (typeof attachNewsCenterListeners === 'function') {
+        attachNewsCenterListeners(content);
+      }
       break;
     case 'space':
       content.innerHTML = renderSpaceTab();
@@ -3901,7 +4042,6 @@ function renderGovernmentTab() {
   const totalTechs = countNationTechs(p);
   const highestTier = getNationHighestTechTier(p);
   const resPts = p.research.points || 0;
-  
   return `
     <div class="tab-section">
       <h3>Administration</h3>
@@ -3922,24 +4062,17 @@ function renderGovernmentTab() {
         <div class="resource-item"><span class="r-name">State AI</span><span class="r-val">${p.decisionQuality.toFixed(1)}</span></div>
         <div class="resource-item"><span class="r-name">Treasury</span><span class="r-val">$${GAME.treasury}M</span></div>
         <div class="resource-item"><span class="r-name">Approval</span><span class="r-val ${GAME.approval >= 50 ? 'positive' : 'negative'}">${GAME.approval}%</span></div>
-        <div class="resource-item"><span class="r-name">Term Year</span><span class="r-val">${GAME.date.getFullYear()}</span></div>
         <div class="resource-item"><span class="r-name">Turn</span><span class="r-val">${GAME.turn}</span></div>
-        <div class="resource-item"><span class="r-name">Global Market</span><span class="r-val ${GAME.globalMarketIndex >= 95 ? 'positive' : 'negative'}">${GAME.globalMarketIndex.toFixed(1)}</span></div>
-        <div class="resource-item"><span class="r-name">Market Shock</span><span class="r-val ${GAME.marketCrashTurns > 0 ? 'negative' : 'positive'}">${GAME.marketCrashTurns > 0 ? `${GAME.marketCrashTurns}m left` : 'None'}</span></div>
-        <div class="resource-item"><span class="r-name">Alliances</span><span class="r-val">${GAME.alliances.length}</span></div>
         <div class="resource-item"><span class="r-name">Conflicts</span><span class="r-val ${GAME.conflicts.length ? 'negative' : 'positive'}">${GAME.conflicts.length}</span></div>
       </div>
     </div>
     <div class="tab-section">
-      <h3>🔬 Technology & Research</h3>
+      <h3>Technology & Research</h3>
       <div class="resource-grid">
         <div class="resource-item"><span class="r-name">Tech Level</span><span class="r-val">T${p.techLevel.toFixed(1)}</span></div>
         <div class="resource-item"><span class="r-name">Technologies</span><span class="r-val">${totalTechs}</span></div>
         <div class="resource-item"><span class="r-name">Highest Tier</span><span class="r-val">${getTechTierName(highestTier)} (${highestTier})</span></div>
         <div class="resource-item"><span class="r-name">Research Points</span><span class="r-val" style="color:var(--accent-blue)">${resPts.toFixed(1)}</span></div>
-      </div>
-      <div style="margin-top:8px">
-        <button class="btn-sm" onclick="openTab('research')" style="width:100%">🔬 Open R&D Lab</button>
       </div>
     </div>
     <div class="tab-section">
@@ -3949,104 +4082,26 @@ function renderGovernmentTab() {
   `;
 }
 
-// ============================================================
-// TAB: ECONOMY (uses economic-system.js)
-// ============================================================
-function renderEconomyTab() {
-  // Our new economic tab from economic-system.js
-  const b = GAME.budget;
-  const p = GAME.playerNation;
-  initNationIndustries(p);
-  const taxData = computeNationTaxRevenue(p);
-  
-  // Budget sliders + economic overview combined
-  let html = '<div class="tab-content">';
-  
-  // Top summary strip
-  html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:12px">';
-  html += '<div class="resource-item"><span class="r-name">GDP</span><span class="r-val" style="font-size:16px;color:var(--accent-green)">$' + p.gdp.toFixed(2) + 'T</span></div>';
-  html += '<div class="resource-item"><span class="r-name">Treasury</span><span class="r-val" style="font-size:16px;color:var(--accent-yellow)">$' + Math.round(GAME.treasury) + 'M</span></div>';
-  html += '<div class="resource-item"><span class="r-name">Tax Revenue</span><span class="r-val" style="font-size:16px;color:var(--accent-blue)">$' + Math.round(taxData.total) + 'M</span></div>';
-  html += '<div class="resource-item"><span class="r-name">Stock Market</span><span class="r-val" style="font-size:16px;color:' + ((p.stockMarket || 100) >= 100 ? 'var(--accent-green)' : 'var(--accent-red)') + '">' + (p.stockMarket || 100).toFixed(1) + '</span></div>';
-  html += '</div>';
-  
-  // Budget section (existing sliders)
-  html += '<div class="section-card">';
-  html += '<h4>📊 Budget Allocation</h4>';
-  html += '<p class="text-muted mb-1">Adjust spending priorities. Total tax revenue: $' + Math.round(taxData.total) + 'M/month</p>';
-  html += renderSlider('military', '⚔️ Military', b.military);
-  html += renderSlider('economy', '💰 Economy', b.economy);
-  html += renderSlider('diplomacy', '🤝 Diplomacy', b.diplomacy);
-  html += renderSlider('intelligence', '🕵️ Intelligence', b.intelligence);
-  html += renderSlider('space', '🚀 Space', b.space);
-  html += renderSlider('social', '🏥 Social', b.social);
-  html += '<div style="margin-top:8px;padding:8px;background:rgba(46,167,255,0.06);border-radius:var(--radius-sm);border:1px solid var(--border-color);font-size:12px">';
-  html += '<div class="stat-row"><span class="stat-label">Total Budget</span><span class="stat-val" id="budgetTotal">100%</span></div>';
-  html += '<div class="stat-row"><span class="stat-label">Tax Revenue</span><span class="stat-val" style="color:var(--accent-green)">+$' + Math.round(taxData.total) + 'M</span></div>';
-  html += '</div>';
-  html += '</div>';
-  
-  // Tax breakdown
-  html += '<div class="section-card"><h4>💰 Tax Collection</h4>';
-  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px">';
-  html += '<div class="resource-item"><span class="r-name">Corporate (' + (taxData.rates.corp * 100).toFixed(0) + '%)</span><span class="r-val">$' + Math.round(taxData.breakdown.corp) + 'M</span></div>';
-  html += '<div class="resource-item"><span class="r-name">Income (' + (taxData.rates.income * 100).toFixed(0) + '%)</span><span class="r-val">$' + Math.round(taxData.breakdown.income) + 'M</span></div>';
-  html += '<div class="resource-item"><span class="r-name">VAT (' + (taxData.rates.vat * 100).toFixed(0) + '%)</span><span class="r-val">$' + Math.round(taxData.breakdown.vat) + 'M</span></div>';
-  html += '<div class="resource-item"><span class="r-name">Tariffs (' + (taxData.rates.tariff * 100).toFixed(0) + '%)</span><span class="r-val">$' + Math.round(taxData.breakdown.tariff) + 'M</span></div>';
-  html += '<div class="resource-item"><span class="r-name">Efficiency</span><span class="r-val" style="color:' + (taxData.efficiency > 0.7 ? 'var(--accent-green)' : 'var(--accent-red)') + '">' + (taxData.efficiency * 100).toFixed(0) + '%</span></div>';
-  html += '<div class="resource-item"><span class="r-name">Informal Economy</span><span class="r-val" style="color:' + (p.informalEconomy > 30 ? 'var(--accent-red)' : 'var(--accent-green)') + '">' + p.informalEconomy.toFixed(1) + '%</span></div>';
-  html += '</div></div>';
-  
-  // Key indicators
-  html += '<div class="section-card"><h4>📈 Key Indicators</h4>';
-  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px">';
-  html += '<div class="resource-item"><span class="r-name">Inflation</span><span class="r-val ' + (p.inflation <= 5 ? 'positive' : 'negative') + '">' + p.inflation.toFixed(1) + '%</span></div>';
-  html += '<div class="resource-item"><span class="r-name">Debt/GDP</span><span class="r-val ' + (p.debtRatio <= 80 ? 'positive' : 'negative') + '">' + p.debtRatio.toFixed(1) + '%</span></div>';
-  html += '<div class="resource-item"><span class="r-name">Deficit</span><span class="r-val ' + (p.deficit <= 4 ? 'positive' : 'negative') + '">' + p.deficit.toFixed(1) + '%</span></div>';
-  html += '<div class="resource-item"><span class="r-name">Employment</span><span class="r-val ' + (p.jobs >= 55 ? 'positive' : 'negative') + '">' + p.jobs.toFixed(1) + '</span></div>';
-  html += '<div class="resource-item"><span class="r-name">Corruption</span><span class="r-val ' + (p.corruption <= 38 ? 'positive' : 'negative') + '">' + p.corruption.toFixed(1) + '</span></div>';
-  html += '<div class="resource-item"><span class="r-name">Corporate Earnings</span><span class="r-val" style="color:var(--accent-blue)">$' + (p.corporateEarnings || 0).toFixed(1) + 'M</span></div>';
-  html += '<div class="resource-item"><span class="r-name">Recession (months)</span><span class="r-val ' + (p.recessionMonths === 0 ? 'positive' : 'negative') + '">' + Math.round(p.recessionMonths || 0) + 'mo</span></div>';
-  html += '<div class="resource-item"><span class="r-name">Crisis Risk</span><span class="r-val ' + (p.crisisRisk <= 45 ? 'positive' : 'negative') + '">' + p.crisisRisk.toFixed(1) + '</span></div>';
-  html += '</div></div>';
-  
-  // Industry sectors
-  html += '<div class="section-card"><h4>🏗️ Industry Sectors</h4>';
-  html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">';
-  INDUSTRY_SECTORS.forEach(function(sector) {
-    const data = p.industries[sector.id];
-    if (!data) return;
-    html += '<div style="background:rgba(9,28,54,0.5);border:1px solid var(--border-color);border-radius:6px;padding:8px">';
-    html += '<div style="font-weight:600;font-size:11px;margin-bottom:2px">' + sector.icon + ' ' + sector.label + '</div>';
-    html += '<div style="font-size:10px;color:var(--text-secondary)">' + data.companyCount + ' companies<br>$' + (data.totalRevenue || 0).toFixed(1) + 'M rev</div></div>';
-  });
-  html += '</div></div>';
-  
-  // Top companies
-  const topCompanies = p.companies.slice().sort(function(a, b) { return b.revenue - a.revenue; }).slice(0, 8);
-  html += '<div class="section-card"><h4>🏢 Top Companies (' + p.companies.length + ' total)</h4>';
-  if (topCompanies.length === 0) {
-    html += '<p class="empty">No companies yet. Improve education and governance.</p>';
-  } else {
-    html += '<div style="max-height:250px;overflow-y:auto">';
-    topCompanies.forEach(function(company, idx) {
-      const sector = INDUSTRY_SECTORS.find(function(s) { return s.id === company.sector; });
-      html += '<div style="display:flex;align-items:center;gap:6px;padding:4px 6px;border-bottom:1px solid rgba(84,140,196,0.12);font-size:11px">';
-      html += '<span style="color:var(--text-muted);width:18px">#' + (idx+1) + '</span>';
-      html += '<span style="font-weight:500;flex:1">' + (sector ? sector.icon : '') + ' ' + company.name + '</span>';
-      html += '<span style="color:var(--text-secondary);font-size:9px;background:rgba(46,167,255,0.1);padding:1px 4px;border-radius:3px">' + company.size + '</span>';
-      html += '<span style="color:var(--accent-green);font-weight:600">$' + company.revenue.toFixed(1) + 'M</span>';
-      if (company.public) {
-        html += '<span style="color:var(--accent-blue)">$' + company.stockPrice.toFixed(1) + '</span>';
-      }
-      html += '</div>';
-    });
-    html += '</div>';
+function renderWorldNewsTab() {
+  if (typeof renderNewsBrowserTab === 'function') {
+    return renderNewsBrowserTab();
   }
-  html += '</div>';
-  
-  html += '</div>';
-  return html;
+  if (typeof renderNewsCenter === 'function') {
+    return renderNewsCenter(180);
+  }
+  return `
+    <div class="tab-section">
+      <h3>World News Command Center</h3>
+      <p class="text-muted">News system is unavailable.</p>
+    </div>
+  `;
+}
+
+function renderEconomyTab() {
+  if (typeof window.renderEconomyTabExternal === 'function') {
+    return window.renderEconomyTabExternal();
+  }
+  return '<div class="tab-error">Economy module unavailable.</div>';
 }
 
 function renderSocietyTab() {
@@ -4102,6 +4157,9 @@ function renderEnvironmentTab() {
 function renderFinanceTab() {
   const p = GAME.playerNation;
   const creditRisk = clamp((p.debtRatio * 0.55 + p.inflation * 4.2 - p.governance * 0.4), 1, 100);
+  const globalBoard = typeof window.renderGlobalStockMarketBoard === 'function'
+    ? window.renderGlobalStockMarketBoard(10)
+    : '<div class="section-card"><h4>🌐 Global Company Market</h4><p class="empty">Global market module unavailable.</p></div>';
 
   return `
     <div class="tab-section">
@@ -4122,6 +4180,7 @@ function renderFinanceTab() {
         <button class="action-btn" onclick="addNews('📌 Sovereign debt refinancing negotiated', 'major')">🔁 Refinance Debt</button>
       </div>
     </div>
+    ${globalBoard}
   `;
 }
 
@@ -4188,6 +4247,21 @@ function renderMilitaryTab() {
 }
 
 // ============================================================
+// TAB: CONFLICTS
+// ============================================================
+function renderConflictsTab() {
+  if (typeof window.renderWarCommandTab === 'function') {
+    return window.renderWarCommandTab();
+  }
+  return `
+    <div class="tab-section">
+      <h3>War Theater</h3>
+      <div class="section-card"><p class="empty">War UI unavailable.</p></div>
+    </div>
+  `;
+}
+
+// ============================================================
 // TAB: DIPLOMACY
 // ============================================================
 function renderDiplomacyTab() {
@@ -4197,18 +4271,14 @@ function renderDiplomacyTab() {
 
   return `
     <div class="tab-section">
-      <h3>Global Blocs & Conflicts</h3>
+      <h3>Global Diplomacy</h3>
       <div class="resource-grid">
         <div class="resource-item"><span class="r-name">Alliances</span><span class="r-val">${GAME.alliances.length}</span></div>
-        <div class="resource-item"><span class="r-name">Active Wars</span><span class="r-val ${GAME.conflicts.length ? 'negative' : 'positive'}">${GAME.conflicts.length}</span></div>
-        <div class="resource-item"><span class="r-name">Player Wars</span><span class="r-val ${GAME.conflicts.some(c => c.a === GAME.playerNation.id || c.b === GAME.playerNation.id) ? 'negative' : 'positive'}">${GAME.conflicts.filter(c => c.a === GAME.playerNation.id || c.b === GAME.playerNation.id).length}</span></div>
+        <div class="resource-item"><span class="r-name">Friendly States</span><span class="r-val positive">${nations.filter(n => getRelation(n.id) >= 20).length}</span></div>
+        <div class="resource-item"><span class="r-name">Hostile States</span><span class="r-val negative">${nations.filter(n => getRelation(n.id) <= -20).length}</span></div>
         <div class="resource-item"><span class="r-name">Player Alliances</span><span class="r-val">${GAME.alliances.filter(a => a.a === GAME.playerNation.id || a.b === GAME.playerNation.id).length}</span></div>
       </div>
-      <p class="text-muted" style="margin-top:8px">
-        ${GAME.conflicts.length
-          ? GAME.conflicts.slice(0, 3).map(c => `${NATIONS[c.a]?.name || 'Unknown'} vs ${NATIONS[c.b]?.name || 'Unknown'}`).join(' • ')
-          : 'No active wars at this moment.'}
-      </p>
+      <p class="text-muted" style="margin-top:8px">Conflicts are now managed in the dedicated Conflicts tab.</p>
     </div>
     <div class="tab-section">
       <h3>Foreign Relations</h3>
@@ -4257,6 +4327,10 @@ function attachDiplomacyListeners() {
 // TAB: INTELLIGENCE
 // ============================================================
 function renderIntelTab() {
+  const center = typeof renderNewsCenter === 'function'
+    ? renderNewsCenter(120)
+    : '<div class="tab-section"><h3>World News Command Center</h3><p class="text-muted">News system not available.</p></div>';
+
   return `
     <div class="tab-section">
       <h3>Intelligence Overview</h3>
@@ -4268,15 +4342,7 @@ function renderIntelTab() {
         <div class="resource-item"><span class="r-name">Threat Intel</span><span class="r-val">${GAME.threatLevel}</span></div>
       </div>
     </div>
-    <div class="tab-section">
-      <h3>Reports</h3>
-      ${newsLog.length === 0 
-        ? '<p class="text-muted">No intel reports yet. Run the simulation to gather intelligence.</p>'
-        : newsLog.slice(0, 5).map(n => 
-            `<div class="news-item ${n.type}" style="margin-bottom:4px">🕵️ ${n.title}</div>`
-          ).join('')
-      }
-    </div>
+    ${center}
     <div class="tab-section">
       <h3>Covert Actions</h3>
       <div class="action-grid" style="grid-template-columns:1fr 1fr">
@@ -4727,6 +4793,12 @@ function handleResize() {
 function init() {
   cacheDom();
   initializeHistory();
+  if (typeof initNationIndustries === 'function') {
+    Object.values(NATIONS).forEach(nation => {
+      if (!nation.failedState) initNationIndustries(nation);
+    });
+    syncPlayerNationFromRecord();
+  }
   updateHUD();
   initMap();
   loadGeoBoundariesMap();
@@ -4736,6 +4808,7 @@ function init() {
   setupTabs();
   setupMobileSidebar();
   setupMenu();
+  if (typeof initWarSystem === 'function') initWarSystem();
 
   // Add initial news
   addNews('📌 Welcome to Sovereign State: Global Hegemony', 'minor');

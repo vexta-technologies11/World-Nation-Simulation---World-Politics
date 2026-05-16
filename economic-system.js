@@ -222,6 +222,34 @@ const RESOURCE_TYPES = [
   { id: 'fertileLand',label: 'Fertile Land',icon: '🌱', basePrice: 0.3, depleteRate: 0.001 },
 ];
 
+const COMPANY_TYPES = [
+  { id: 'startup', label: 'Startup', growthBias: 0.012, resilience: -0.01, rndBias: 0.08, capBias: 0.8 },
+  { id: 'private', label: 'Private Firm', growthBias: 0.004, resilience: 0.01, rndBias: 0.03, capBias: 1.0 },
+  { id: 'state', label: 'State-backed', growthBias: -0.002, resilience: 0.03, rndBias: 0.02, capBias: 1.15 },
+  { id: 'cooperative', label: 'Co-op', growthBias: 0.001, resilience: 0.02, rndBias: 0.01, capBias: 0.95 },
+  { id: 'multinational', label: 'Multinational', growthBias: 0.006, resilience: 0.015, rndBias: 0.05, capBias: 1.25 },
+];
+
+const SECTOR_DEMAND_BASE = {
+  agriculture: 0.060,
+  manufacturing: 0.085,
+  energy: 0.070,
+  technology: 0.045,
+  services: 0.090,
+  tourism: 0.030,
+};
+
+const SECTOR_TIER_RESOURCE_GATES = {
+  agriculture: [0, 0, 10, 13, 16, 20, 24, 28, 32, 36, 40],
+  manufacturing: [0, 0, 9, 12, 15, 18, 22, 26, 30, 34, 38],
+  energy: [0, 0, 12, 15, 18, 22, 26, 30, 33, 37, 42],
+  technology: [0, 0, 13, 16, 19, 23, 27, 31, 35, 39, 44],
+  services: [0, 0, 8, 10, 13, 16, 20, 24, 28, 32, 36],
+  tourism: [0, 0, 6, 9, 12, 15, 18, 22, 26, 30, 34],
+};
+
+const COMPANY_TIER_RESEARCH_REQUIREMENT = [0, 0, 1, 3, 6, 10, 15, 21, 28, 36, 45];
+
 // ─── SEEDED RANDOM HELPER ────────────────────────────
 function seededResourceRand(seed) {
   let h = 0;
@@ -243,6 +271,115 @@ function initNationResources(nation) {
   });
 }
 
+function initNationMarketDynamics(nation) {
+  if (nation.marketDynamics) return;
+  nation.marketDynamics = { sectorDemand: {} };
+  INDUSTRY_SECTORS.forEach(sector => {
+    nation.marketDynamics.sectorDemand[sector.id] = clamp(90 + Math.random() * 25, 55, 145);
+  });
+}
+
+function getCompanyTypeDef(typeId) {
+  return COMPANY_TYPES.find(t => t.id === typeId) || COMPANY_TYPES[1];
+}
+
+function getNationCompanyTag(nation) {
+  if (nation?.iso2) return String(nation.iso2).toUpperCase();
+  if (!nation?.name) return 'LOCAL';
+  return String(nation.name)
+    .split(' ')
+    .map(part => part[0])
+    .join('')
+    .slice(0, 4)
+    .toUpperCase() || 'LOCAL';
+}
+
+function getCompanyDisplayName(company) {
+  if (!company) return 'Unknown Co';
+  if (company.displayName) return company.displayName;
+  if (company.baseName && company.countryTag) return company.baseName + ' ' + company.countryTag;
+  return company.name || company.baseName || 'Unknown Co';
+}
+
+function pickCompanyTypeForNation(nation) {
+  const gov = String(nation.governmentStyle || '');
+  const weights = {
+    startup: clamp((nation.education - 30) * 0.02 + 1.0, 0.4, 2.8),
+    private: 1.5,
+    state: (gov.includes('authoritarian') || gov.includes('dictatorship') || gov.includes('military')) ? 1.9 : 0.8,
+    cooperative: clamp((nation.happiness - 40) * 0.02 + 0.9, 0.3, 2.0),
+    multinational: clamp((nation.gdp - 2) * 0.04 + 0.6, 0.2, 2.4),
+  };
+
+  const total = Object.values(weights).reduce((a, b) => a + b, 0);
+  let roll = Math.random() * total;
+  for (const t of COMPANY_TYPES) {
+    roll -= weights[t.id] || 0;
+    if (roll <= 0) return t.id;
+  }
+  return 'private';
+}
+
+function getNationResearchStrength(nation) {
+  const discovered = nation.research?.discoveredTechs || [];
+  const purchased = nation.research?.purchasedTechs || [];
+  const allTechs = [...discovered, ...purchased];
+  let weighted = 0;
+  allTechs.forEach(id => {
+    const tech = findTechById(id);
+    weighted += tech ? clamp(tech.tier, 1, 25) : 1;
+  });
+  weighted += clamp((nation.techLevel || 1) * 3, 0, 40);
+  return weighted;
+}
+
+function getNationUnlockedCompanyTier(nation, sectorId) {
+  initNationResources(nation);
+  const researchStrength = getNationResearchStrength(nation);
+  const techCap = clamp(Math.floor((nation.techLevel || 1.0) + (nation.education || 0) / 25), 1, 10);
+  let unlocked = 1;
+  for (let tier = 1; tier <= techCap; tier++) {
+    const reqResearch = COMPANY_TIER_RESEARCH_REQUIREMENT[tier] || 999;
+    const reqResource = (SECTOR_TIER_RESOURCE_GATES[sectorId] || SECTOR_TIER_RESOURCE_GATES.services)[tier] || 100;
+    const resourceReq = INDUSTRY_SECTORS.find(s => s.id === sectorId)?.resourceReq;
+    const resourceLevel = resourceReq ? Number(nation.resourceData?.[resourceReq]?.level || 0) : Number(nation.resources || 0);
+    if (researchStrength >= reqResearch && resourceLevel >= reqResource) {
+      unlocked = tier;
+    } else {
+      break;
+    }
+  }
+  return clamp(unlocked, 1, 10);
+}
+
+function getSectorDemandStats(nation, sectorId) {
+  initNationMarketDynamics(nation);
+  const baseIndex = Number(nation.marketDynamics.sectorDemand[sectorId] || 100);
+  const perCapita = nation.gdp / Math.max(nation.population / 1000, 1);
+  const consumerPower = clamp(perCapita * 0.55 + 0.35, 0.35, 3.5);
+  const macroStability = clamp((nation.stability + nation.governance + nation.jobs) / 180, 0.55, 1.35);
+  const inflationDrag = clamp(1 - Math.max(0, nation.inflation - 4) * 0.03, 0.5, 1.1);
+  const globalPulse = clamp((GAME?.globalMarketIndex || 100) / 100, 0.6, 1.5);
+  const populationScale = Math.max(1, nation.population || 1);
+  const baseDemand = (SECTOR_DEMAND_BASE[sectorId] || 0.05) * populationScale;
+  const demandDollar = Math.max(0.1, baseDemand * (baseIndex / 100) * consumerPower * macroStability * inflationDrag * globalPulse);
+  return { demandIndex: baseIndex, demandDollar };
+}
+
+function estimateCompanyWorth(company) {
+  const revenue = Number(company.revenue || 0);
+  const profit = revenue * Number(company.profitMargin || 0);
+  const tierPremium = 1 + clamp((company.techTier || 1) * 0.08, 0.05, 1.3);
+  const growthPremium = 1 + clamp((company.growthRate || 0) * 2.5, -0.4, 1.4);
+  const privateWorth = Math.max(0.01, profit * 26 * tierPremium * growthPremium);
+  if (company.public) {
+    const shares = Math.max(1, Number(company.sharesOutstanding || 50_000_000));
+    const marketCap = Math.max(0.01, Number(company.stockPrice || 0.1) * shares / 1_000_000);
+    return Math.max(privateWorth, marketCap);
+  }
+  return privateWorth;
+}
+
 // ─── GET RESOURCE MULTIPLIER FOR A SECTOR ────────────
 // Returns 0.2-2.0 multiplier based on how much resource the nation has.
 function getResourceMultiplier(nation, sectorId) {
@@ -256,7 +393,9 @@ function getResourceMultiplier(nation, sectorId) {
 // ─── INIT INDUSTRIES FOR A NATION ─────────────────────
 
 function initNationIndustries(nation) {
-  if (nation.industries) return;
+  const hasIndustryMap = !!nation.industries && typeof nation.industries === 'object' && Object.keys(nation.industries).length > 0;
+  const hasCompaniesArray = Array.isArray(nation.companies);
+  if (hasIndustryMap && hasCompaniesArray) return;
   
   nation.industries = {};
   nation.companies = [];
@@ -264,6 +403,9 @@ function initNationIndustries(nation) {
   nation.taxCollected = 0;
   nation.informalEconomy = clamp((100 - nation.governance) * 0.3 + nation.corruption * 0.5, 5, 60);
   nation.corporateEarnings = 0;
+  nation.localMarketCap = 0;
+  nation.localListedCount = 0;
+  initNationMarketDynamics(nation);
   
   // Initialize each sector
   INDUSTRY_SECTORS.forEach(sector => {
@@ -284,6 +426,7 @@ function initNationIndustries(nation) {
 function generateNationCompanies(nation, initial = false) {
   initNationIndustries(nation);
   initNationResources(nation);
+  initNationMarketDynamics(nation);
   
   const pop = nation.population; // millions
   const edu = nation.education;
@@ -355,32 +498,56 @@ function generateNationCompanies(nation, initial = false) {
     else { size = 'small'; sizeMultiplier = 0.3; }
     
     const namePool = COMPANY_NAMES[chosenSector] || COMPANY_NAMES.services;
-    const name = namePool[Math.floor(Math.random() * namePool.length)];
+    const baseName = namePool[Math.floor(Math.random() * namePool.length)];
+    const countryTag = getNationCompanyTag(nation);
+    const companyName = baseName + ' ' + countryTag;
     
     // Skip if duplicate name
-    if (nation.companies.some(c => c.name === name)) continue;
+    if (nation.companies.some(c => c.baseName === baseName || c.name === companyName)) continue;
     
     const baseRevenue = (INDUSTRY_SECTORS.find(s => s.id === chosenSector)?.baseRevenue || 1.0);
     // Company revenue: resource availability × tech × edu × market size
     const resourceMult = getResourceMultiplier(nation, chosenSector);
+    const demandStats = getSectorDemandStats(nation, chosenSector);
     const marketSizeFactor = clamp(nation.population / 100, 0.3, 3.0);
-    const revenue = baseRevenue * sizeMultiplier * (0.5 + Math.random()) * clamp(tech / 5, 0.2, 2.5) * marketSizeFactor * resourceMult;
+    const demandLift = clamp(demandStats.demandDollar / Math.max(1, marketSizeFactor * 2.5), 0.45, 3.5);
+    const revenue = baseRevenue * sizeMultiplier * (0.5 + Math.random()) * clamp(tech / 5, 0.2, 2.5) * marketSizeFactor * resourceMult * demandLift;
     const employees = Math.round(revenue * (20 + Math.random() * 30) * (1 + eduFactor * 0.2));
+    const companyType = pickCompanyTypeForNation(nation);
+    const typeDef = getCompanyTypeDef(companyType);
+    const maxTier = getNationUnlockedCompanyTier(nation, chosenSector);
+    const startTier = clamp(1 + Math.floor(Math.random() * Math.max(1, Math.min(3, maxTier))), 1, 10);
+    const sharesOutstanding = (8 + Math.floor(Math.random() * 260)) * 1_000_000;
     
     const company = {
       id: nation.id + '_comp_' + nation.companies.length,
-      name: name,
+      baseName,
+      countryTag,
+      displayName: companyName,
+      name: companyName,
       sector: chosenSector,
+      companyType,
       size: size,
-      revenue: clamp(revenue, 0.01, 200), // $M per month
+      revenue: Math.max(0.05, revenue), // $M per month
       employees: clamp(employees, 1, 50000),
       taxPaid: 0,
       founded: GAME?.turn || 0,
       stockPrice: sizeMultiplier > 2 ? (10 + Math.random() * 90) : 0,
+      sharesOutstanding,
+      marketCap: 0,
       public: size === 'corporation' && Math.random() > 0.4,
-      growthRate: (Math.random() - 0.4) * 0.04,
-      profitMargin: clamp((0.05 + Math.random() * 0.15) * govFactor, 0.01, 0.25),
+      stockChangePct: 0,
+      growthRate: clamp((Math.random() - 0.2) * 0.05 + typeDef.growthBias, -0.08, 0.25),
+      profitMargin: clamp((0.06 + Math.random() * 0.12) * govFactor * (0.95 + typeDef.capBias * 0.1), 0.02, 0.40),
+      techTier: startTier,
+      techProgress: 0,
+      breakthroughs: 0,
+      moat: clamp(0.9 + Math.random() * 0.6, 0.8, 2.0),
+      distressMonths: 0,
+      strategicFocus: chosenSector, // company knows what sector it's in
+      worth: 0,
     };
+    company.worth = estimateCompanyWorth(company);
     
     nation.companies.push(company);
     
@@ -426,9 +593,6 @@ function computeNationTaxRevenue(nation) {
   
   const totalTax = corpTax + incomeTax + vatTax + tariffTax;
   
-  nation.taxRevenue = totalTax;
-  nation.taxCollected += totalTax;
-  
   return {
     total: totalTax,
     breakdown: { corp: corpTax, income: incomeTax, vat: vatTax, tariff: tariffTax },
@@ -453,6 +617,8 @@ function processAllEconomicSystems() {
     
     // 3. Compute tax revenue
     const taxData = computeNationTaxRevenue(nation);
+    nation.taxRevenue = taxData.total;
+    nation.taxCollected = (nation.taxCollected || 0) + taxData.total;
     
     // 4. Update GDP growth with FIXED rate
     updateNationGDP(nation, taxData);
@@ -466,43 +632,43 @@ function processAllEconomicSystems() {
     // 7. Update corporate earnings tracking
     updateCorporateEarnings(nation);
     
-    // ── NATION TREASURY (ALL nations) ──
-    // Initialize treasury if not set
-    if (nation.treasury === undefined) nation.treasury = taxData.total * 2;
-    
-    // Government spending based on budget
-    const govBudget = nation.aiBudget || { military: 20, economy: 15, diplomacy: 10, intelligence: 10, space: 5, social: 20 };
-    const totalBudgetPct = govBudget.military + govBudget.economy + govBudget.diplomacy + govBudget.intelligence + govBudget.space + govBudget.social;
-    const spendingMultiplier = taxData.total / Math.max(totalBudgetPct, 1);
-    
-    const govSpending = (
-      govBudget.military * spendingMultiplier * 1.2 +
-      govBudget.economy * spendingMultiplier * 1.0 +
-      govBudget.diplomacy * spendingMultiplier * 0.8 +
-      govBudget.intelligence * spendingMultiplier * 0.7 +
-      govBudget.space * spendingMultiplier * 0.9 +
-      govBudget.social * spendingMultiplier * 1.1
-    );
-    
-    // Debt service (% of tax revenue based on debt ratio, realistic ~2-5% of revenue)
-    const debtService = taxData.total * (nation.debtRatio || 40) * 0.0005;
-    const totalExpenses = govSpending + debtService;
-    
-    // Revenue includes taxes + actual company tax paid (companyTaxPaid is in $M)
-    let companyTaxCollected = 0;
-    nation.companies.forEach(c => { companyTaxCollected += c.taxPaid || 0; });
-    const totalRevenue = taxData.total + companyTaxCollected;
-    
-    // Update treasury
-    nation.treasury += Math.round(totalRevenue - totalExpenses);
-    nation.treasury = Math.max(0, nation.treasury);
-    
-    // Update deficit based on revenue vs spending
-    const deficitChange = (totalExpenses - totalRevenue) / (nation.gdp * 1_000_000 / 12 || 1);
-    nation.deficit = clamp(
-      (nation.deficit || 0) + deficitChange * 0.5,
-      -12, 35
-    );
+    // ── NATION TREASURY (AI nations) ──
+    // Player treasury is handled by applyPlayerTreasuryFromTaxes() with player budget sliders.
+    const isPlayerNation = nation.id === GAME.playerNation?.id;
+    if (!isPlayerNation) {
+      if (nation.treasury === undefined) nation.treasury = taxData.total * 2;
+
+      const govBudget = nation.aiBudget || { military: 20, economy: 15, diplomacy: 10, intelligence: 10, space: 5, social: 20 };
+      const totalBudgetPct = govBudget.military + govBudget.economy + govBudget.diplomacy + govBudget.intelligence + govBudget.space + govBudget.social;
+      const spendingMultiplier = taxData.total / Math.max(totalBudgetPct, 1);
+
+      const govSpending = (
+        govBudget.military * spendingMultiplier * 1.2 +
+        govBudget.economy * spendingMultiplier * 1.0 +
+        govBudget.diplomacy * spendingMultiplier * 0.8 +
+        govBudget.intelligence * spendingMultiplier * 0.7 +
+        govBudget.space * spendingMultiplier * 0.9 +
+        govBudget.social * spendingMultiplier * 1.1
+      );
+
+      // Debt service (% of tax revenue based on debt ratio, realistic ~2-5% of revenue)
+      const debtService = taxData.total * (nation.debtRatio || 40) * 0.0005;
+      const totalExpenses = govSpending + debtService;
+
+      // Revenue includes taxes + actual company tax paid (companyTaxPaid is in $M)
+      let companyTaxCollected = 0;
+      nation.companies.forEach(c => { companyTaxCollected += c.taxPaid || 0; });
+      const totalRevenue = taxData.total + companyTaxCollected;
+
+      nation.treasury += Math.round(totalRevenue - totalExpenses);
+      nation.treasury = Math.max(0, nation.treasury);
+
+      const deficitChange = (totalExpenses - totalRevenue) / (nation.gdp * 1_000_000 / 12 || 1);
+      nation.deficit = clamp(
+        (nation.deficit || 0) + deficitChange * 0.5,
+        -12, 35
+      );
+    }
   });
   
   // 8. Apply player treasury from taxes (player still uses GAME.treasury)
@@ -513,6 +679,7 @@ function processAllEconomicSystems() {
 
 function updateNationCompanies(nation) {
   initNationResources(nation);
+  initNationMarketDynamics(nation);
   const edu = nation.education;
   const tech = nation.techLevel;
   const resources = nation.resources;
@@ -562,6 +729,39 @@ function updateNationCompanies(nation) {
   });
   
   const companiesToRemove = [];
+  const strugglingCompanies = [];
+  const sectorCompanyCounts = {};
+  const sectorSupplyRevenue = {};
+  const sectorTypeCounts = {};
+  const sectorRDLeaders = {}; // Track highest-tier companies per sector for spillover
+  
+  nation.companies.forEach(company => {
+    sectorCompanyCounts[company.sector] = (sectorCompanyCounts[company.sector] || 0) + 1;
+    sectorSupplyRevenue[company.sector] = (sectorSupplyRevenue[company.sector] || 0) + Number(company.revenue || 0);
+    const typeKey = company.sector + '::' + (company.companyType || 'private');
+    sectorTypeCounts[typeKey] = (sectorTypeCounts[typeKey] || 0) + 1;
+    
+    // Track highest-tier company per sector
+    const currentLeader = sectorRDLeaders[company.sector];
+    if (!currentLeader || Number(company.techTier || 1) > Number(currentLeader.techTier || 1)) {
+      sectorRDLeaders[company.sector] = company;
+    }
+  });
+  
+  INDUSTRY_SECTORS.forEach(sector => {
+    const current = Number(nation.marketDynamics.sectorDemand[sector.id] || 100);
+    const perCapita = nation.gdp / Math.max(nation.population / 1000, 1);
+    const demandTarget = clamp(
+      75 + perCapita * 7 + (nation.stability - 50) * 0.4 + (nation.jobs - 50) * 0.35 - Math.max(0, nation.inflation - 5) * 2.4,
+      40,
+      220
+    );
+    nation.marketDynamics.sectorDemand[sector.id] = clamp(
+      current + (demandTarget - current) * 0.08 + (Math.random() - 0.5) * 4,
+      35,
+      240
+    );
+  });
   
   nation.companies.forEach(company => {
     // Resource multiplier: how much resource availability boosts this company
@@ -569,6 +769,15 @@ function updateNationCompanies(nation) {
     
     // Research multiplier for this sector
     const rMult = researchMult[company.sector] || 1.0;
+    const typeDef = getCompanyTypeDef(company.companyType);
+    const demandStats = getSectorDemandStats(nation, company.sector);
+    const sectorSupply = Math.max(0.1, sectorSupplyRevenue[company.sector] || 0.1);
+    const supplyRatio = sectorSupply / Math.max(demandStats.demandDollar, 0.1);
+    const demandPriceMult = clamp(1 + (1 - supplyRatio) * 0.45, 0.45, 1.9);
+    const sectorCount = sectorCompanyCounts[company.sector] || 1;
+    const sameTypeCount = sectorTypeCounts[company.sector + '::' + (company.companyType || 'private')] || 1;
+    const competitionPenalty = clamp(Math.max(0, sectorCount - 7) * 0.004 + Math.max(0, sameTypeCount - 3) * 0.003, 0, 0.16);
+    const marketPower = clamp((company.moat || 1.0) * (1 + (company.techTier || 1) * 0.03), 0.65, 2.5);
     
     // Sector-specific revenue modifiers from resources & research
     let sectorBonus = 0;
@@ -589,17 +798,25 @@ function updateNationCompanies(nation) {
     // Energy bottleneck: low energy security drags ALL companies
     const energyDrag = energySecurity < 40 ? clamp((energySecurity - 40) * 0.0003, -0.012, 0) : 0;
     
-    // Company growth/decline — now resource & research aware
+    // Sector R&D spillover: if a leader in this sector is at T3+, smaller companies get +5% R&D
+    let spilloverBonus = 0;
+    const sectorLeader = sectorRDLeaders[company.sector];
+    if (sectorLeader && Number(sectorLeader.techTier || 1) >= 3 && company !== sectorLeader) {
+      const tierGap = Number(sectorLeader.techTier || 1) - Number(company.techTier || 1);
+      spilloverBonus = clamp(tierGap * 0.02, 0.05, 0.15); // Leaders help the sector
+    }
+    
+    // Company growth/decline — now resource & research aware + spillover
     const innovationBonus = company.sector === 'technology' ? clamp((tech - 3) * 0.002, 0, 0.01) : 0;
     const eduBonus = clamp((edu - 30) * 0.0002, -0.005, 0.005);
     const randomShock = (Math.random() - 0.5) * 0.03;
     
-    company.growthRate = clamp(company.growthRate + innovationBonus + eduBonus + sectorBonus + energyDrag + randomShock * 0.1, -0.08, 0.08);
+    company.growthRate = clamp(company.growthRate + innovationBonus + eduBonus + sectorBonus + energyDrag + randomShock * 0.1 + typeDef.growthBias + spilloverBonus * 0.08, -0.16, 0.35);
     
     // REVENUE: base × growth × resource multiplier × research multiplier
     // This is the core supply chain: resources × tech × edu = output
     const baseRevenueBefore = company.revenue;
-    company.revenue = clamp(company.revenue * (1 + company.growthRate) * resourceMult * rMult, 0.01, 200);
+    company.revenue = Math.max(0.0005, company.revenue * (1 + company.growthRate) * resourceMult * rMult * demandPriceMult * marketPower * (1 - competitionPenalty));
     
     // Track resource consumption: resource-using sectors consume resources
     const sectorDef = INDUSTRY_SECTORS.find(s => s.id === company.sector);
@@ -618,8 +835,50 @@ function updateNationCompanies(nation) {
       nation.resourceData[produces].level = clamp(nation.resourceData[produces].level + produced * 0.001, 1, 100);
     }
     
-    company.employees = Math.round(company.employees * (1 + company.growthRate * 0.5));
+    company.employees = Math.round(company.employees * (1 + company.growthRate * 0.4));
     company.employees = clamp(company.employees, 1, 50000);
+
+    // Company tech progress with strategic tier focus
+    const unlockedTier = getNationUnlockedCompanyTier(nation, company.sector);
+    const tier = clamp(Number(company.techTier || 1), 1, 10);
+    const nextTier = Math.min(10, tier + 1);
+    // MUCH cheaper tier progression: base 10 + (tier-1)*8 = realistic advancement path
+    const tierDifficulty = 10 + (nextTier - 1) * 8;
+    const resourceReq = INDUSTRY_SECTORS.find(s => s.id === company.sector)?.resourceReq;
+    const resourceLevel = resourceReq ? Number(nation.resourceData?.[resourceReq]?.level || 0) : Number(nation.resources || 0);
+    const resourceGate = (SECTOR_TIER_RESOURCE_GATES[company.sector] || SECTOR_TIER_RESOURCE_GATES.services)[nextTier] || 100;
+    // Companies with strategic focus spend 3-5x more on R&D
+    const focusBonus = company.strategicFocus === company.sector ? 3.0 : 1.0;
+    const rndInvestment = Math.max(0, company.revenue * (0.015 + typeDef.rndBias * 0.04) * focusBonus);
+    company.techProgress = Number(company.techProgress || 0) + rndInvestment * clamp((edu + tech * 8 + nation.governance) / 170, 0.4, 1.6);
+    const breakthroughChance = clamp(0.003 + (typeDef.rndBias * 0.004) + (nation.education - 40) * 0.00004 + (company.techTier || 1) * -0.0001, 0.0008, 0.025);
+    const canAdvance = tier < unlockedTier && resourceLevel >= resourceGate && company.techProgress >= tierDifficulty;
+    if (canAdvance && Math.random() < breakthroughChance) {
+      company.techTier = tier + 1;
+      company.breakthroughs = Number(company.breakthroughs || 0) + 1;
+      company.techProgress = Math.max(0, company.techProgress - tierDifficulty * 0.7);
+      company.strategicFocus = company.sector; // lock in focus after breakthrough
+      addNews(`🚀 ${company.name} (${nation.name}) breaks through to T${company.techTier}! Strategic focus: ${company.sector}`, 'minor');
+    }
+
+    // Profitability: tech tier and moat provide pricing power
+    const tierPricingPower = clamp((company.techTier || 1) * 0.015, 0.015, 0.12);
+    const moatPricingPower = clamp((company.moat || 1 - 1) * 0.06, 0, 0.15);
+    const marginDrift = (demandPriceMult - 1) * 0.025 - competitionPenalty * 0.15 - Math.max(0, nation.inflation - 5) * 0.001;
+    company.profitMargin = clamp(
+      Number(company.profitMargin || 0.08) + marginDrift + typeDef.resilience * 0.015 + tierPricingPower + moatPricingPower,
+      0.02, 0.50
+    );
+
+    // Distress and bankruptcy logic — companies survive longer if they innovate
+    const innovationDefense = (company.techTier || 1) > 2 ? 0.5 : 1.0; // Higher tier = resilience
+    const isDistressed = company.revenue < 0.03 || company.profitMargin < 0.015 || (company.growthRate < -0.08 && supplyRatio > 1.4);
+    company.distressMonths = isDistressed ? (Number(company.distressMonths || 0) + 1) : Math.max(0, Number(company.distressMonths || 0) - 1);
+    const collapseRisk = clamp(
+      ((company.distressMonths - 6) * 0.025 + (0.025 - company.profitMargin) * 0.6) * innovationDefense,
+      0, 0.75
+    );
+    if (company.distressMonths >= 5) strugglingCompanies.push(company);
     
     // Update sector totals
     const sector = nation.industries[company.sector];
@@ -628,22 +887,28 @@ function updateNationCompanies(nation) {
       sector.totalEmployees += company.employees - Math.round(company.employees / (1 + company.growthRate * 0.5)) || 0;
     }
     
-    // Company death (bankruptcy)
-    if (company.revenue < 0.005 || (company.growthRate < -0.05 && Math.random() < 0.05)) {
+    // Company death (bankruptcy) — harder to kill if innovative
+    const isHighTier = (company.techTier || 1) >= 3;
+    const collapseThreshold = isHighTier ? 8 : 7;
+    if ((company.distressMonths > collapseThreshold && Math.random() < collapseRisk) || (company.growthRate < -0.14 && Math.random() < 0.08)) {
       companiesToRemove.push(company);
     }
     
-    // Company growth: small → medium → large → corporation
-    if (company.size === 'small' && company.revenue > 8 && Math.random() < 0.08) {
+    // Company growth: small → medium → large → corporation (faster if high-growth)
+    const sizeGrowthMult = clamp(1 + company.growthRate * 3, 0.8, 2.2); // growth rate amplifies size upgrade odds
+    if (company.size === 'small' && company.revenue > 5 && Math.random() < 0.08 * sizeGrowthMult) {
       company.size = 'medium';
-    } else if (company.size === 'medium' && company.revenue > 25 && Math.random() < 0.05) {
+      addNews(`📊 ${getCompanyDisplayName(company)} (${nation.name}) expands to medium business`, 'minor');
+    } else if (company.size === 'medium' && company.revenue > 18 && Math.random() < 0.06 * sizeGrowthMult) {
       company.size = 'large';
-    } else if (company.size === 'large' && company.revenue > 60 && Math.random() < 0.03) {
+      addNews(`📈 ${getCompanyDisplayName(company)} (${nation.name}) becomes a large enterprise`, 'minor');
+    } else if (company.size === 'large' && company.revenue > 50 && Math.random() < 0.04 * sizeGrowthMult) {
       company.size = 'corporation';
-      if (!company.public && Math.random() > 0.3) {
+      if (!company.public && Math.random() > 0.4) {
         company.public = true;
-        company.stockPrice = 10 + Math.random() * 90;
-        addNews(`📈 ${company.name} (${nation.name}) goes public at $${company.stockPrice.toFixed(0)}/share`, 'minor');
+        company.stockPrice = 15 + Math.random() * 85;
+        company.sharesOutstanding = company.sharesOutstanding || ((15 + Math.floor(Math.random() * 235)) * 1_000_000);
+        addNews(`📈 ${getCompanyDisplayName(company)} (${nation.name}) goes public at $${company.stockPrice.toFixed(0)}/share`, 'minor');
       }
     }
     
@@ -651,20 +916,87 @@ function updateNationCompanies(nation) {
     const taxConfig = TAX_BY_GOVERNMENT[nation.governmentStyle] || TAX_BY_GOVERNMENT.federal_republic;
     const effectiveRate = company.public ? taxConfig.corp * 1.1 : taxConfig.corp;
     company.taxPaid = company.revenue * effectiveRate * (1 - nation.corruption / 200);
+    company.worth = estimateCompanyWorth(company);
   });
+
+  // Competitive consolidation: distressed firms can be merged/acquired by stronger rivals.
+  strugglingCompanies
+    .sort((a, b) => Number(b.distressMonths || 0) - Number(a.distressMonths || 0))
+    .forEach(target => {
+      if (companiesToRemove.includes(target)) return;
+      const buyers = nation.companies
+        .filter(candidate =>
+          candidate !== target &&
+          candidate.sector === target.sector &&
+          !companiesToRemove.includes(candidate) &&
+          Number(candidate.revenue || 0) > Number(target.revenue || 0) * 1.2 && // Lowered barrier
+          Number(candidate.techTier || 1) >= Number(target.techTier || 1) - 1 // Allow slight tech mismatches
+        )
+        .sort((a, b) => Number(b.revenue || 0) - Number(a.revenue || 0));
+
+      const buyer = buyers[0];
+      if (!buyer) return;
+      
+      // Higher tech match = higher acquisition incentive
+      const techSynergy = Number(buyer.techTier || 1) === Number(target.techTier || 1) ? 1.4 : 1.0;
+      const buyoutChance = clamp(
+        0.18 + Number(target.distressMonths || 0) * 0.06 + 
+        (Number(buyer.revenue || 0) / Math.max(1, Number(target.revenue || 0))) * 0.03 +
+        techSynergy * 0.08,
+        0.12, 0.85
+      );
+      if (Math.random() > buyoutChance) return;
+
+      // Merger synergies: revenue consolidation improved
+      const mergerSynergy = 1 + techSynergy * 0.12; // up to 15% revenue uplift from tech synergy
+      buyer.revenue = Math.max(0.1, Number(buyer.revenue || 0) + Number(target.revenue || 0) * 0.7 * mergerSynergy);
+      buyer.employees = clamp(Math.round(Number(buyer.employees || 0) + Number(target.employees || 0) * 0.72), 1, 250000);
+      
+      // R&D spillover: acquire target's tech progress
+      if (Number(target.techProgress || 0) > 0) {
+        const spillover = Math.max(0, Number(target.techProgress || 0) * 0.35);
+        buyer.techProgress = Number(buyer.techProgress || 0) + spillover;
+      }
+      
+      // Moat improvement from consolidation
+      buyer.moat = clamp(Number(buyer.moat || 1) + 0.12 + techSynergy * 0.1, 0.8, 3.5);
+      
+      // Strategic focus stays with buyer, or consolidates if matched
+      if (Number(buyer.techTier || 1) > Number(target.techTier || 1)) {
+        buyer.strategicFocus = buyer.strategicFocus || buyer.sector;
+      }
+      
+      buyer.worth = estimateCompanyWorth(buyer);
+
+      companiesToRemove.push(target);
+      addNews(`🤝 ${getCompanyDisplayName(buyer)} acquires ${getCompanyDisplayName(target)} in ${nation.name} (R&D spillover +${Math.round((spillover || 0) * 10)})`, 'minor');
+    });
   
   // Remove dead companies
-  companiesToRemove.forEach(dead => {
+  const uniqueRemovals = [...new Set(companiesToRemove)];
+  uniqueRemovals.forEach(dead => {
     const idx = nation.companies.indexOf(dead);
     if (idx > -1) {
       nation.companies.splice(idx, 1);
-      const sector = nation.industries[dead.sector];
-      if (sector) {
-        sector.companyCount = Math.max(0, sector.companyCount - 1);
-        sector.totalRevenue = Math.max(0, sector.totalRevenue - dead.revenue);
-        sector.totalEmployees = Math.max(0, sector.totalEmployees - dead.employees);
+      if (Math.random() < 0.35) {
+        addNews(`💥 ${getCompanyDisplayName(dead)} declared bankruptcy in ${nation.name}`, 'minor');
       }
     }
+  });
+
+  // Rebuild sector totals after bankruptcies and acquisitions.
+  Object.keys(nation.industries || {}).forEach(sectorId => {
+    if (!nation.industries[sectorId]) return;
+    nation.industries[sectorId].companyCount = 0;
+    nation.industries[sectorId].totalRevenue = 0;
+    nation.industries[sectorId].totalEmployees = 0;
+  });
+  nation.companies.forEach(company => {
+    const sector = nation.industries?.[company.sector];
+    if (!sector) return;
+    sector.companyCount += 1;
+    sector.totalRevenue += Number(company.revenue || 0);
+    sector.totalEmployees += Number(company.employees || 0);
   });
 }
 
@@ -845,19 +1177,22 @@ function updateNationStockMarket(nation) {
   
   const change = earningsSignal + gdpSignal + stabilitySignal + governanceSignal - inflationPenalty - warPenalty + boomSignal + volatility + ipoMomentum;
   
-  nation.stockMarket = clamp(
-    (nation.stockMarket || 100) + change,
-    15, 240
-  );
+  nation.stockMarket = Math.max(15, (nation.stockMarket || 100) + change);
   
   // Update individual stock prices
   publicCompanies.forEach(company => {
     const sectorVolatility = (INDUSTRY_SECTORS.find(s => s.id === company.sector)?.volatility || 0.2);
-    company.stockPrice = clamp(
-      company.stockPrice * (1 + (change / 100) + (Math.random() - 0.5) * sectorVolatility * 0.1),
-      0.5, 500
-    );
+    const prev = Math.max(0.1, Number(company.stockPrice || 0.1));
+    const move = (change / 100) + (Math.random() - 0.5) * sectorVolatility * 0.1 + clamp((company.growthRate || 0) * 0.5, -0.08, 0.12);
+    company.stockPrice = Math.max(0.1, prev * (1 + move));
+    company.stockChangePct = ((company.stockPrice - prev) / prev) * 100;
+    const shares = Math.max(1, Number(company.sharesOutstanding || 50_000_000));
+    company.marketCap = company.stockPrice * shares / 1_000_000;
+    company.worth = estimateCompanyWorth(company);
   });
+
+  nation.localListedCount = publicCompanies.length;
+  nation.localMarketCap = publicCompanies.reduce((sum, c) => sum + Math.max(0, Number(c.marketCap || 0)), 0);
 }
 
 // ─── INFORMAL ECONOMY ─────────────────────────────────
@@ -895,8 +1230,12 @@ function applyPlayerTreasuryFromTaxes() {
   
   initNationIndustries(player);
   
-  const taxData = computeNationTaxRevenue(player);
-  const totalTaxRevenue = taxData.total;
+  let totalTaxRevenue = Number(player.taxRevenue) || 0;
+  if (totalTaxRevenue <= 0) {
+    const taxData = computeNationTaxRevenue(player);
+    totalTaxRevenue = taxData.total;
+    player.taxRevenue = totalTaxRevenue;
+  }
   
   // Budget spending (convert percentages to $M)
   const budget = GAME.budget;
@@ -934,77 +1273,221 @@ function applyPlayerTreasuryFromTaxes() {
   );
 }
 
+function formatMarketMoney(amountM) {
+  const v = Number(amountM || 0);
+  if (!Number.isFinite(v)) return '$0M';
+  if (v >= 1_000_000) return '$' + (v / 1_000_000).toFixed(2) + 'T';
+  if (v >= 1_000) return '$' + (v / 1_000).toFixed(2) + 'B';
+  return '$' + v.toFixed(1) + 'M';
+}
+
+function getNationStockMarketSnapshot(nationIdOrObj) {
+  const nation = typeof nationIdOrObj === 'string' ? NATIONS[nationIdOrObj] : nationIdOrObj;
+  if (!nation) {
+    return {
+      listed: 0,
+      marketCap: 0,
+      topGainer: null,
+      topLoser: null,
+      topRevenue: null,
+      topProfit: null,
+      topWorth: null,
+    };
+  }
+  initNationIndustries(nation);
+  const companies = Array.isArray(nation.companies) ? nation.companies : [];
+  const listed = companies.filter(c => c.public);
+  const marketCap = listed.reduce((sum, c) => sum + Math.max(0, Number(c.marketCap || estimateCompanyWorth(c))), 0);
+  const byChange = listed.slice().sort((a, b) => Number(b.stockChangePct || 0) - Number(a.stockChangePct || 0));
+  const byRevenue = companies.slice().sort((a, b) => Number(b.revenue || 0) - Number(a.revenue || 0));
+  const byProfit = companies.slice().sort((a, b) => (Number(b.revenue || 0) * Number(b.profitMargin || 0)) - (Number(a.revenue || 0) * Number(a.profitMargin || 0)));
+  const byWorth = companies.slice().sort((a, b) => Number(b.worth || estimateCompanyWorth(b)) - Number(a.worth || estimateCompanyWorth(a)));
+  return {
+    listed: listed.length,
+    marketCap,
+    topGainer: byChange[0] || null,
+    topLoser: byChange.length ? byChange[byChange.length - 1] : null,
+    topRevenue: byRevenue[0] || null,
+    topProfit: byProfit[0] || null,
+    topWorth: byWorth[0] || null,
+  };
+}
+
+function renderGlobalStockMarketBoard(limit = 12) {
+  const rows = [];
+  Object.values(NATIONS).forEach(nation => {
+    if (nation.failedState) return;
+    initNationIndustries(nation);
+    (nation.companies || []).forEach(company => {
+      const revenue = Number(company.revenue || 0);
+      const profit = revenue * Number(company.profitMargin || 0);
+      const worth = Number(company.worth || estimateCompanyWorth(company));
+      rows.push({ nation, company, revenue, profit, worth, change: Number(company.stockChangePct || 0) });
+    });
+  });
+
+  const topWorth = rows.slice().sort((a, b) => b.worth - a.worth).slice(0, limit);
+  const topRevenue = rows.slice().sort((a, b) => b.revenue - a.revenue).slice(0, limit);
+  const topProfit = rows.slice().sort((a, b) => b.profit - a.profit).slice(0, limit);
+  const gainers = rows.filter(r => r.company.public).slice().sort((a, b) => b.change - a.change).slice(0, Math.max(5, Math.floor(limit / 2)));
+  const losers = rows.filter(r => r.company.public).slice().sort((a, b) => a.change - b.change).slice(0, Math.max(5, Math.floor(limit / 2)));
+  const globalCap = rows.filter(r => r.company.public).reduce((sum, r) => sum + Math.max(0, Number(r.company.marketCap || r.worth || 0)), 0);
+  const avgMove = rows.filter(r => r.company.public).reduce((sum, r) => sum + Number(r.change || 0), 0) / Math.max(1, rows.filter(r => r.company.public).length);
+  const stamp = (typeof formatDate === 'function' && GAME?.date) ? formatDate(GAME.date) : 'Now';
+
+  const renderRows = (list, valueLabel) => {
+    if (list.length === 0) return '<p class="empty">No companies yet.</p>';
+    return '<div style="max-height:240px;overflow-y:auto">' + list.map((r, i) =>
+      '<div style="display:flex;gap:8px;align-items:center;padding:5px 6px;border-bottom:1px solid rgba(84,140,196,0.12);font-size:11px">' +
+      '<span style="color:var(--text-muted);width:20px">#' + (i + 1) + '</span>' +
+      '<span style="flex:1">' + r.nation.flag + ' ' + r.company.name + ' <span style="color:var(--text-muted)">T' + (r.company.techTier || 1) + '</span></span>' +
+      '<span style="color:var(--accent-green);font-weight:600">' + valueLabel(r) + '</span>' +
+      '</div>'
+    ).join('') + '</div>';
+  };
+
+  let html = '<div class="section-card"><h4>🌐 Global Company Market</h4>';
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:6px;margin-bottom:8px">';
+  html += '<div class="resource-item"><span class="r-name">Global Listed</span><span class="r-val">' + rows.filter(r => r.company.public).length + '</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Global Cap</span><span class="r-val" style="color:var(--accent-blue)">' + formatMarketMoney(globalCap) + '</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Avg Daily Move</span><span class="r-val" style="color:' + (avgMove >= 0 ? 'var(--accent-green)' : 'var(--accent-red)') + '">' + avgMove.toFixed(2) + '%</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Snapshot</span><span class="r-val">Turn ' + (GAME?.turn || 0) + ' • ' + stamp + '</span></div>';
+  html += '</div>';
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:8px">';
+  html += '<div><h5 style="margin:2px 0 6px 0">Top Company Worth</h5>' + renderRows(topWorth, r => formatMarketMoney(r.worth)) + '</div>';
+  html += '<div><h5 style="margin:2px 0 6px 0">Top Revenue Leaders</h5>' + renderRows(topRevenue, r => formatMarketMoney(r.revenue)) + '</div>';
+  html += '<div><h5 style="margin:2px 0 6px 0">Top Profit Leaders</h5>' + renderRows(topProfit, r => formatMarketMoney(r.profit)) + '</div>';
+  html += '<div><h5 style="margin:2px 0 6px 0">Listed Gainers / Losers</h5>';
+  html += '<div style="max-height:240px;overflow-y:auto">';
+  html += gainers.map(r => '<div style="display:flex;justify-content:space-between;padding:4px 6px;border-bottom:1px solid rgba(84,140,196,0.12);font-size:11px"><span>📈 ' + r.nation.flag + ' ' + r.company.name + '</span><span style="color:var(--accent-green)">+' + r.change.toFixed(2) + '%</span></div>').join('');
+  html += losers.map(r => '<div style="display:flex;justify-content:space-between;padding:4px 6px;border-bottom:1px solid rgba(84,140,196,0.12);font-size:11px"><span>📉 ' + r.nation.flag + ' ' + r.company.name + '</span><span style="color:var(--accent-red)">' + r.change.toFixed(2) + '%</span></div>').join('');
+  html += '</div></div>';
+  html += '</div></div>';
+  return html;
+}
+
 // ─── RENDER ECONOMY TAB ───────────────────────────────
 
 function renderEconomyTab() {
-  const p = GAME.playerNation;
+  const p = (typeof getPlayerRecord === 'function' ? getPlayerRecord() : null) || GAME.playerNation;
   if (!p) return '<div class="tab-error">No nation selected</div>';
   
   initNationIndustries(p);
   const taxData = computeNationTaxRevenue(p);
+  const allCompanies = Array.isArray(p.companies) ? p.companies : [];
+  const listed = allCompanies.filter(c => c.public);
+  const advancers = listed.filter(c => Number(c.stockChangePct || 0) > 0.02);
+  const decliners = listed.filter(c => Number(c.stockChangePct || 0) < -0.02);
+  const unchanged = Math.max(0, listed.length - advancers.length - decliners.length);
+  const turnover = listed.reduce((sum, c) => sum + Math.max(0, Number(c.revenue || 0) * 0.08), 0);
+  const avgMargin = allCompanies.reduce((sum, c) => sum + Number(c.profitMargin || 0), 0) / Math.max(1, allCompanies.length);
+  const listedProfit = listed.reduce((sum, c) => sum + Number(c.revenue || 0) * Number(c.profitMargin || 0), 0);
+  const marketSnapshot = getNationStockMarketSnapshot(p);
+  const stamp = (typeof formatDate === 'function' && GAME?.date) ? formatDate(GAME.date) : 'Now';
+
+  const topMovers = listed.slice().sort((a, b) => Math.abs(Number(b.stockChangePct || 0)) - Math.abs(Number(a.stockChangePct || 0))).slice(0, 12);
+  const topByWorth = allCompanies.slice().sort((a, b) => Number(b.worth || estimateCompanyWorth(b)) - Number(a.worth || estimateCompanyWorth(a))).slice(0, 12);
+  const sectorBoard = INDUSTRY_SECTORS.map(sector => {
+    const data = p.industries[sector.id] || { totalRevenue: 0, totalEmployees: 0, companyCount: 0, growthRate: 0 };
+    const sectorDemand = Number(p.marketDynamics?.sectorDemand?.[sector.id] || 100);
+    return {
+      sector,
+      revenue: Number(data.totalRevenue || 0),
+      employees: Number(data.totalEmployees || 0),
+      companyCount: Number(data.companyCount || 0),
+      growthRate: Number(data.growthRate || 0),
+      demand: sectorDemand,
+    };
+  }).sort((a, b) => b.revenue - a.revenue);
   
-  // Summary cards
   let html = '<div class="tab-content">';
-  html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px">';
-  html += '<div class="resource-item"><span class="r-name">GDP</span><span class="r-val" style="font-size:18px">$' + p.gdp.toFixed(2) + 'T</span></div>';
-  html += '<div class="resource-item"><span class="r-name">Treasury</span><span class="r-val" style="font-size:18px;color:var(--accent-yellow)">$' + Math.round(GAME.treasury) + 'M</span></div>';
-  html += '<div class="resource-item"><span class="r-name">Tax Revenue</span><span class="r-val" style="font-size:18px;color:var(--accent-green)">$' + Math.round(taxData.total) + 'M</span></div>';
-  html += '<div class="resource-item"><span class="r-name">Stock Market</span><span class="r-val">' + (p.stockMarket || 100).toFixed(1) + '</span></div>';
-  html += '<div class="resource-item"><span class="r-name">Corporate Earnings</span><span class="r-val" style="color:var(--accent-blue)">$' + (p.corporateEarnings || 0).toFixed(1) + 'M</span></div>';
-  html += '<div class="resource-item"><span class="r-name">Informal Economy</span><span class="r-val" style="color:' + (p.informalEconomy > 30 ? 'var(--accent-red)' : 'var(--accent-green)') + '">' + p.informalEconomy.toFixed(1) + '%</span></div>';
+
+  // Market tape (NYSE-style headline)
+  html += '<div class="section-card" style="padding:10px 12px;margin-bottom:10px;background:linear-gradient(135deg,rgba(9,28,54,0.9),rgba(16,43,79,0.9))">';
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">';
+  html += '<div style="font-size:13px;font-weight:700;color:var(--accent-blue)">🏛️ ' + p.name + ' Exchange • LIVE</div>';
+  html += '<div style="font-size:11px;color:var(--text-muted)">Turn ' + (GAME?.turn || 0) + ' • ' + stamp + '</div>';
   html += '</div>';
-  
-  // Tax breakdown
-  html += '<div class="section-card"><h4>💰 Tax Revenue Breakdown</h4>';
-  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">';
-  html += '<div class="resource-item"><span class="r-name">Corporate Tax (' + (taxData.rates.corp * 100).toFixed(0) + '%)</span><span class="r-val">$' + Math.round(taxData.breakdown.corp) + 'M</span></div>';
-  html += '<div class="resource-item"><span class="r-name">Income Tax (' + (taxData.rates.income * 100).toFixed(0) + '%)</span><span class="r-val">$' + Math.round(taxData.breakdown.income) + 'M</span></div>';
-  html += '<div class="resource-item"><span class="r-name">VAT (' + (taxData.rates.vat * 100).toFixed(0) + '%)</span><span class="r-val">$' + Math.round(taxData.breakdown.vat) + 'M</span></div>';
-  html += '<div class="resource-item"><span class="r-name">Tariffs (' + (taxData.rates.tariff * 100).toFixed(0) + '%)</span><span class="r-val">$' + Math.round(taxData.breakdown.tariff) + 'M</span></div>';
-  html += '<div class="resource-item"><span class="r-name">Collection Efficiency</span><span class="r-val" style="color:' + (taxData.efficiency > 0.7 ? 'var(--accent-green)' : 'var(--accent-red)') + '">' + (taxData.efficiency * 100).toFixed(0) + '%</span></div>';
-  html += '<div class="resource-item"><span class="r-name">Total Collected</span><span class="r-val" style="color:var(--accent-green)">$' + Math.round(p.taxCollected) + 'M</span></div>';
+  html += '<div style="margin-top:8px;display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:6px">';
+  html += '<div class="resource-item"><span class="r-name">Index</span><span class="r-val">' + Number(p.stockMarket || 100).toFixed(2) + '</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Market Cap</span><span class="r-val" style="color:var(--accent-blue)">' + formatMarketMoney(marketSnapshot.marketCap) + '</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Listed</span><span class="r-val">' + listed.length + '</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Adv/Dec/Flat</span><span class="r-val" style="color:' + (advancers.length >= decliners.length ? 'var(--accent-green)' : 'var(--accent-red)') + '">' + advancers.length + '/' + decliners.length + '/' + unchanged + '</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Turnover</span><span class="r-val">' + formatMarketMoney(turnover) + '</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Avg Margin</span><span class="r-val" style="color:' + (avgMargin >= 0.12 ? 'var(--accent-green)' : 'var(--accent-yellow)') + '">' + (avgMargin * 100).toFixed(2) + '%</span></div>';
+  html += '</div>';
+  html += '</div>';
+
+  // Macro-to-market linkage (ensures economy wiring visibility)
+  html += '<div class="section-card"><h4>🔗 Economy-Market Link</h4>';
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:6px">';
+  html += '<div class="resource-item"><span class="r-name">GDP</span><span class="r-val">$' + Number(p.gdp || 0).toFixed(2) + 'T</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Tax Revenue</span><span class="r-val" style="color:var(--accent-green)">$' + Math.round(taxData.total) + 'M</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Listed Profit</span><span class="r-val" style="color:var(--accent-blue)">' + formatMarketMoney(listedProfit) + '</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Corporate Earnings</span><span class="r-val">' + formatMarketMoney(p.corporateEarnings || 0) + '</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Inflation</span><span class="r-val ' + (Number(p.inflation || 0) <= 5 ? 'positive' : 'negative') + '">' + Number(p.inflation || 0).toFixed(2) + '%</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Debt/GDP</span><span class="r-val ' + (Number(p.debtRatio || 0) <= 80 ? 'positive' : 'negative') + '">' + Number(p.debtRatio || 0).toFixed(1) + '%</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Collection Eff.</span><span class="r-val ' + (taxData.efficiency >= 0.7 ? 'positive' : 'negative') + '">' + (taxData.efficiency * 100).toFixed(1) + '%</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Informal Economy</span><span class="r-val ' + (Number(p.informalEconomy || 0) > 30 ? 'negative' : 'positive') + '">' + Number(p.informalEconomy || 0).toFixed(1) + '%</span></div>';
   html += '</div></div>';
-  
-  // Industry sectors
-  html += '<div class="section-card"><h4>🏗️ Industry Sectors</h4>';
-  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">';
-  INDUSTRY_SECTORS.forEach(sector => {
-    const data = p.industries[sector.id];
-    if (!data) return;
-    const sectorRevenue = data.totalRevenue || 0;
-    const employees = data.totalEmployees || 0;
+
+  // Movers + Leaders board
+  html += '<div class="section-card"><h4>📈 Movers & Leaders</h4>';
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:8px">';
+  html += '<div><h5 style="margin:2px 0 6px 0">Top Movers</h5><div style="max-height:280px;overflow-y:auto">';
+  if (topMovers.length === 0) {
+    html += '<p class="empty">No listed companies yet.</p>';
+  } else {
+    topMovers.forEach((company, idx) => {
+      const chg = Number(company.stockChangePct || 0);
+      html += '<div style="display:flex;align-items:center;gap:8px;padding:5px 6px;border-bottom:1px solid rgba(84,140,196,0.12);font-size:11px">';
+      html += '<span style="width:18px;color:var(--text-muted)">#' + (idx + 1) + '</span>';
+      html += '<span style="flex:1">' + getCompanyDisplayName(company) + ' <span style="color:var(--text-muted)">T' + (company.techTier || 1) + '</span></span>';
+      html += '<span style="color:' + (chg >= 0 ? 'var(--accent-green)' : 'var(--accent-red)') + '">' + (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%</span>';
+      html += '<span style="color:var(--accent-blue)">$' + Number(company.stockPrice || 0).toFixed(2) + '</span>';
+      html += '</div>';
+    });
+  }
+  html += '</div></div>';
+
+  html += '<div><h5 style="margin:2px 0 6px 0">Top Worth (Local)</h5><div style="max-height:280px;overflow-y:auto">';
+  if (topByWorth.length === 0) {
+    html += '<p class="empty">No companies founded yet.</p>';
+  } else {
+    topByWorth.forEach((company, idx) => {
+      const profit = Number(company.revenue || 0) * Number(company.profitMargin || 0);
+      const worth = Number(company.worth || estimateCompanyWorth(company));
+      html += '<div style="display:flex;align-items:center;gap:8px;padding:5px 6px;border-bottom:1px solid rgba(84,140,196,0.12);font-size:11px">';
+      html += '<span style="width:18px;color:var(--text-muted)">#' + (idx + 1) + '</span>';
+      html += '<span style="flex:1">' + getCompanyDisplayName(company) + '</span>';
+      html += '<span style="color:var(--accent-green)">Rev ' + formatMarketMoney(company.revenue) + '</span>';
+      html += '<span style="color:var(--accent-blue)">Pft ' + formatMarketMoney(profit) + '</span>';
+      html += '<span style="color:var(--accent-yellow)">W ' + formatMarketMoney(worth) + '</span>';
+      html += '</div>';
+    });
+  }
+  html += '</div></div>';
+  html += '</div></div>';
+
+  // Sector tape / heatmap
+  html += '<div class="section-card"><h4>🧭 Sector Heatmap</h4><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:6px">';
+  sectorBoard.forEach(item => {
+    const heat = clamp((item.growthRate * 100) + (item.demand - 100) * 0.15, -12, 16);
+    const color = heat >= 1 ? 'var(--accent-green)' : (heat <= -1 ? 'var(--accent-red)' : 'var(--accent-yellow)');
     html += '<div style="background:rgba(9,28,54,0.5);border:1px solid var(--border-color);border-radius:6px;padding:8px">';
-    html += '<div style="font-weight:600;font-size:12px;margin-bottom:3px">' + sector.icon + ' ' + sector.label + '</div>';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">';
+    html += '<span style="font-weight:600">' + item.sector.icon + ' ' + item.sector.label + '</span>';
+    html += '<span style="color:' + color + ';font-weight:700">Heat ' + (heat >= 0 ? '+' : '') + heat.toFixed(1) + '</span>';
+    html += '</div>';
     html += '<div style="font-size:11px;color:var(--text-secondary)">';
-    html += 'Companies: ' + data.companyCount + ' | Revenue: $' + sectorRevenue.toFixed(1) + 'M<br>';
-    html += 'Employees: ' + employees.toLocaleString() + ' | Growth: ' + (data.growthRate * 100).toFixed(1) + '%';
+    html += 'Demand ' + item.demand.toFixed(1) + ' | Revenue ' + formatMarketMoney(item.revenue) + '<br>';
+    html += 'Companies ' + item.companyCount + ' | Employees ' + item.employees.toLocaleString() + ' | Growth ' + (item.growthRate * 100).toFixed(2) + '%';
     html += '</div></div>';
   });
   html += '</div></div>';
-  
-  // Top companies
-  const topCompanies = p.companies.slice().sort((a, b) => b.revenue - a.revenue).slice(0, 10);
-  html += '<div class="section-card"><h4>🏢 Top Companies (' + p.companies.length + ' total)</h4>';
-  if (topCompanies.length === 0) {
-    html += '<p class="empty">No companies founded yet. Improve education and governance to attract investment.</p>';
-  } else {
-    html += '<div style="max-height:300px;overflow-y:auto">';
-    topCompanies.forEach((company, idx) => {
-      const sector = INDUSTRY_SECTORS.find(s => s.id === company.sector);
-      html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid rgba(84,140,196,0.12);font-size:12px">';
-      html += '<span style="color:var(--text-muted);width:20px">#' + (idx+1) + '</span>';
-      html += '<span style="font-weight:500;flex:1">' + (sector ? sector.icon : '') + ' ' + company.name + '</span>';
-      html += '<span style="color:var(--text-secondary);font-size:10px;background:rgba(46,167,255,0.1);padding:1px 5px;border-radius:3px">' + company.size + '</span>';
-      html += '<span style="color:var(--accent-green);font-weight:600">$' + company.revenue.toFixed(1) + 'M</span>';
-      if (company.public) {
-        html += '<span style="color:var(--accent-blue)">$' + company.stockPrice.toFixed(1) + '</span>';
-      }
-      html += '<span style="color:var(--text-muted);font-size:10px">' + company.employees.toLocaleString() + ' emp</span>';
-      html += '</div>';
-    });
-    html += '</div>';
-  }
-  html += '</div>';
+
+  // Keep global board at bottom
+  html += renderGlobalStockMarketBoard(10);
   
   html += '</div>';
   return html;
@@ -1013,7 +1496,10 @@ function renderEconomyTab() {
 // ─── EXPOSE GLOBAL ────────────────────────────────────
 
 window.renderEconomyTab = renderEconomyTab;
+window.renderEconomyTabExternal = renderEconomyTab;
 window.initNationIndustries = initNationIndustries;
 window.processAllEconomicSystems = processAllEconomicSystems;
 window.updateNationGDP = updateNationGDP;
 window.updateNationStockMarket = updateNationStockMarket;
+window.getNationStockMarketSnapshot = getNationStockMarketSnapshot;
+window.renderGlobalStockMarketBoard = renderGlobalStockMarketBoard;

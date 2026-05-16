@@ -32,7 +32,7 @@ function initConflictTemplate() {
     key: '',
     a: '',
     b: '',
-    type: 'war',                // 'war', 'border_skirmish', 'invasion', 'civil_war'
+    type: 'war',                // 'war', 'invasion', 'civil_war'
     severity: 5,                // 1-10 scale
     
     // Duration tracking
@@ -44,6 +44,7 @@ function initConflictTemplate() {
     phase: 'active',            // 'active', 'ceasefire', 'peace'
     ceasefireTurns: 0,
     ceasefireDuration: 0,
+    peaceTurns: 0,
     
     // Battle tracking
     battles: [],
@@ -52,7 +53,7 @@ function initConflictTemplate() {
     
     // Casualties
     casualties: { a_military: 0, b_military: 0, a_civilian: 0, b_civilian: 0, a_wounded: 0, b_wounded: 0 },
-    equipmentLost: { a: { total: 0 }, b: { total: 0 } },
+    equipmentLost: { a: { total: 0, byType: {} }, b: { total: 0, byType: {} } },
     
     // Exhaustion
     aExhaustion: 0,             // 0-100
@@ -60,6 +61,7 @@ function initConflictTemplate() {
     
     // Economic damage inflicted so far (total GDP lost)
     economicDamage: { a: 0, b: 0 },
+    moneySpent: { a: 0, b: 0 },
     
     // Mobilization levels (0-100, how much military deployed)
     aMobilization: 50,
@@ -71,7 +73,105 @@ function initConflictTemplate() {
     
     // Last escalation
     lastEscalationTurn: 0,
+
+    // Settlement tracking
+    warDeals: [],
+    surrender: null,
+    winner: null,
+    endReason: null,
   };
+}
+
+function getTruceKey(a, b) {
+  return [a, b].sort().join('::');
+}
+
+function hasActiveTruce(a, b) {
+  const key = getTruceKey(a, b);
+  const tr = GAME.truces?.[key];
+  return !!tr && tr.turnsRemaining > 0;
+}
+
+function createTruce(a, b, turns = 18, reason = 'post-war settlement') {
+  if (!GAME.truces) GAME.truces = {};
+  const key = getTruceKey(a, b);
+  GAME.truces[key] = {
+    a,
+    b,
+    turnsRemaining: clamp(Math.floor(turns), 6, 48),
+    reason,
+    startTurn: GAME.turn,
+  };
+}
+
+function processTruceDecay() {
+  if (!GAME.truces) GAME.truces = {};
+  Object.keys(GAME.truces).forEach((k) => {
+    const tr = GAME.truces[k];
+    if (!tr) return;
+    tr.turnsRemaining -= 1;
+    if (tr.turnsRemaining <= 0) delete GAME.truces[k];
+  });
+}
+
+function ensureWarArchive() {
+  if (!GAME.warHistory) GAME.warHistory = [];
+}
+
+function archiveConflict(conflict) {
+  if (!conflict) return;
+  ensureWarArchive();
+
+  const exists = GAME.warHistory.some((w) => w.key === conflict.key && w.startTurn === conflict.startTurn);
+  if (exists) return;
+
+  const totalCasualties = (conflict.casualties?.a_military || 0) + (conflict.casualties?.b_military || 0);
+  GAME.warHistory.unshift({
+    key: conflict.key,
+    a: conflict.a,
+    b: conflict.b,
+    type: conflict.type,
+    severity: conflict.severity,
+    startTurn: conflict.startTurn,
+    endTurn: GAME.turn,
+    duration: conflict.turn,
+    casualties: { ...(conflict.casualties || {}) },
+    equipmentLost: {
+      a: { total: conflict.equipmentLost?.a?.total || 0, byType: { ...(conflict.equipmentLost?.a?.byType || {}) } },
+      b: { total: conflict.equipmentLost?.b?.total || 0, byType: { ...(conflict.equipmentLost?.b?.byType || {}) } },
+    },
+    moneySpent: { ...(conflict.moneySpent || { a: 0, b: 0 }) },
+    economicDamage: { ...(conflict.economicDamage || { a: 0, b: 0 }) },
+    winner: conflict.winner || null,
+    surrender: conflict.surrender || null,
+    endReason: conflict.endReason || 'peace',
+    warDeals: Array.isArray(conflict.warDeals) ? [...conflict.warDeals] : [],
+    totalCasualties,
+  });
+
+  if (GAME.warHistory.length > 60) GAME.warHistory.length = 60;
+}
+
+function summarizeLossTypes(byType = {}) {
+  return Object.keys(byType)
+    .sort((x, y) => (byType[y] || 0) - (byType[x] || 0))
+    .slice(0, 4)
+    .map((k) => `${k}:${byType[k]}`)
+    .join(', ');
+}
+
+function estimateWinChances(conflict) {
+  const aCas = conflict.casualties?.a_military || 0;
+  const bCas = conflict.casualties?.b_military || 0;
+  const front = conflict.frontShift || 0;
+  const aEx = conflict.aExhaustion || 0;
+  const bEx = conflict.bExhaustion || 0;
+  const lastBattle = conflict.battles?.length ? conflict.battles[conflict.battles.length - 1] : null;
+  const lastDelta = lastBattle ? ((lastBattle.aPower || 0) - (lastBattle.bPower || 0)) / Math.max((lastBattle.aPower || 0) + (lastBattle.bPower || 0), 1) : 0;
+
+  const aSignal = -front * 8 + (bCas - aCas) / 2000 + (bEx - aEx) * 0.35 + lastDelta * 22;
+  const aPct = clamp(50 + aSignal, 5, 95);
+  return { aPct: Math.round(aPct), bPct: Math.round(100 - aPct) };
 }
 
 // ============================================================
@@ -128,15 +228,218 @@ function getDesperationScore(nation) {
   return clamp(score, 0, 2);
 }
 
+function getActiveEquipmentPower(nation) {
+  const f = nation?.militaryForces;
+  if (!f) return 0;
+
+  const weights = {
+    fighters: 1.6, bombers: 2.4, helicopters: 0.8, transport: 0.3,
+    tanks: 1.8, ifvs: 0.7, artillery: 1.2,
+    destroyers: 3.0, submarines: 3.2, carriers: 7.0, patrol: 0.8,
+    missileSystems: 2.5, drones: 0.5, satellites: 0.2, rifles: 0.005,
+  };
+
+  let power = 0;
+  Object.keys(weights).forEach((k) => {
+    const active = Number(f[k]?.active) || 0;
+    power += active * weights[k];
+  });
+  return power;
+}
+
+function applyBattleEquipmentLosses(nation, totalLoss) {
+  const f = nation?.militaryForces;
+  if (!f || !totalLoss || totalLoss <= 0) return { total: 0, byType: {} };
+
+  const priority = [
+    'tanks', 'ifvs', 'artillery', 'fighters', 'helicopters', 'bombers',
+    'destroyers', 'submarines', 'patrol', 'missileSystems', 'drones', 'rifles'
+  ];
+
+  let remaining = Math.floor(totalLoss);
+  let removed = 0;
+  const byType = {};
+
+  for (const type of priority) {
+    if (remaining <= 0) break;
+    if (!f[type]) continue;
+
+    const active = Math.max(0, Math.floor(f[type].active || 0));
+    if (active <= 0) continue;
+
+    const chunk = Math.max(1, Math.floor(totalLoss * 0.12));
+    const loss = Math.min(active, remaining, chunk);
+    f[type].active = Math.max(0, active - loss);
+    f[type].total = Math.max(0, (f[type].total || 0) - loss);
+    byType[type] = (byType[type] || 0) + loss;
+    remaining -= loss;
+    removed += loss;
+  }
+
+  return { total: removed, byType };
+}
+
+function triggerWarProcurement(nation, severity) {
+  if (!nation || nation.failedState) return;
+
+  if (nation.aiBudget && typeof nation.aiBudget === 'object') {
+    nation.aiBudget.military = clamp((nation.aiBudget.military || 20) + severity * 0.12, 4, 55);
+    nation.aiBudget.diplomacy = clamp((nation.aiBudget.diplomacy || 12) + 0.15, 3, 30);
+  }
+
+  if (typeof getNationDefenseCompanies === 'function' && typeof _produceEquipInternal === 'function') {
+    const forces = nation.militaryForces || {};
+    const activePersonnel = Math.max(0, Number(forces.activePersonnel) || 0);
+    const desiredRifles = Math.floor(activePersonnel * 2000); // 2 rifles per active soldier-equivalent
+
+    const stockpile = nation.militaryStockpile || {};
+    const currentRifles = (stockpile.rifle || []).reduce((sum, it) => sum + (it.quantity || 0), 0);
+
+    const companies = getNationDefenseCompanies(nation) || [];
+    const militarySpend = clamp((nation.aiBudget?.military || 20) / 100, 0.05, 0.7);
+    const productionPulse = clamp(0.16 + severity * 0.18 + militarySpend * 0.45, 0.18, 0.85);
+
+    companies.forEach((company) => {
+      if (!company?.equipment?.length) return;
+      if (Math.random() > productionPulse) return;
+
+      const candidates = company.equipment.filter((eq) => ['tank', 'fighter', 'artillery', 'missile', 'drone', 'rifle', 'destroyer', 'submarine'].includes(eq.cat));
+      if (!candidates.length) return;
+
+      const riflePool = candidates.filter((eq) => eq.cat === 'rifle');
+      const heavyPool = candidates.filter((eq) => ['tank', 'fighter', 'destroyer', 'submarine', 'artillery', 'missile'].includes(eq.cat));
+
+      let pick = null;
+      if (currentRifles < desiredRifles && riflePool.length > 0 && Math.random() < 0.6) {
+        pick = riflePool[Math.floor(Math.random() * riflePool.length)];
+      } else if (heavyPool.length > 0) {
+        pick = heavyPool[Math.floor(Math.random() * heavyPool.length)];
+      } else {
+        pick = candidates[Math.floor(Math.random() * candidates.length)];
+      }
+
+      const qty = pick.cat === 'rifle'
+        ? (4 + Math.floor(Math.random() * 10))
+        : (1 + Math.floor(Math.random() * 3));
+      _produceEquipInternal(company, pick.id, qty, nation, false);
+    });
+  }
+}
+
+function applyWarDealsAndTruce(conflict, winnerId) {
+  const loserId = winnerId === conflict.a ? conflict.b : conflict.a;
+  const winner = NATIONS[winnerId];
+  const loser = NATIONS[loserId];
+  if (!winner || !loser) return;
+
+  const deals = [];
+
+  // Reparations
+  const loserTreasury = loser.treasury || 0;
+  const reparations = Math.min(loserTreasury * 0.18, 240 + conflict.severity * 20);
+  if (reparations > 1) {
+    loser.treasury = Math.max(0, loserTreasury - reparations);
+    winner.treasury = (winner.treasury || 0) + reparations;
+    deals.push(`reparations:$${Math.round(reparations)}M`);
+  }
+
+  // Disarmament and exhaustion relief for both sides
+  loser.militaryPower = clamp((loser.militaryPower || 50) * 0.93, 1, 100);
+  winner.militaryPower = clamp((winner.militaryPower || 50) * 0.99, 1, 100);
+  conflict.aExhaustion = clamp(conflict.aExhaustion - 25, 0, 100);
+  conflict.bExhaustion = clamp(conflict.bExhaustion - 25, 0, 100);
+  deals.push('disarmament-lite');
+
+  // Truce duration scales with severity
+  const truceTurns = 12 + conflict.severity * 2;
+  createTruce(conflict.a, conflict.b, truceTurns, winnerId ? 'peace-deal' : 'stalemate');
+  deals.push(`truce:${truceTurns}t`);
+
+  conflict.warDeals = deals;
+  conflict.winner = winnerId;
+  conflict.endReason = conflict.surrender ? 'surrender' : 'peace-deal';
+}
+
+function trySurrender(conflict) {
+  const a = NATIONS[conflict.a];
+  const b = NATIONS[conflict.b];
+  if (!a || !b || conflict.phase !== 'active' || conflict.turn < 6) return false;
+
+  const aPressure = conflict.aExhaustion + (100 - (a.stability || 50)) + (a.gdp < 0.9 ? 25 : 0);
+  const bPressure = conflict.bExhaustion + (100 - (b.stability || 50)) + (b.gdp < 0.9 ? 25 : 0);
+  const casualtyGapA = conflict.casualties.a_military - conflict.casualties.b_military;
+  const casualtyGapB = conflict.casualties.b_military - conflict.casualties.a_military;
+
+  // A surrenders
+  if ((aPressure > 185 || casualtyGapA > 18000) && conflict.frontShift > 4) {
+    conflict.surrender = conflict.a;
+    conflict.phase = 'peace';
+    conflict.peaceTurns = 0;
+    applyWarDealsAndTruce(conflict, conflict.b);
+    addNews(`🏳️ SURRENDER: ${a.name} surrenders to ${b.name}. War ends with binding deals and truce.`, 'critical');
+    return true;
+  }
+
+  // B surrenders
+  if ((bPressure > 185 || casualtyGapB > 18000) && conflict.frontShift < -4) {
+    conflict.surrender = conflict.b;
+    conflict.phase = 'peace';
+    conflict.peaceTurns = 0;
+    applyWarDealsAndTruce(conflict, conflict.a);
+    addNews(`🏳️ SURRENDER: ${b.name} surrenders to ${a.name}. War ends with binding deals and truce.`, 'critical');
+    return true;
+  }
+
+  return false;
+}
+
+function attemptGreatPowerMediation(conflict) {
+  if (!conflict || conflict.phase !== 'active' || conflict.turn < 5) return false;
+  const a = NATIONS[conflict.a];
+  const b = NATIONS[conflict.b];
+  if (!a || !b) return false;
+
+  const mediators = Object.values(NATIONS).filter((n) => {
+    if (!n || n.failedState || n.id === conflict.a || n.id === conflict.b) return false;
+    const relA = typeof getRelationBetween === 'function' ? getRelationBetween(n.id, conflict.a) : 0;
+    const relB = typeof getRelationBetween === 'function' ? getRelationBetween(n.id, conflict.b) : 0;
+    const diplomaticWeight = (n.aiBudget?.diplomacy || 10) + (n.leaderType === 'Diplomat' ? 8 : 0);
+    return relA > -10 && relB > -10 && n.militaryPower > 55 && diplomaticWeight > 14;
+  });
+
+  if (!mediators.length) return false;
+  const mediator = mediators[Math.floor(Math.random() * mediators.length)];
+  const mediationChance = clamp(
+    0.08 + (mediator.militaryPower || 50) / 450 + ((mediator.aiBudget?.diplomacy || 10) / 100) + (conflict.turn * 0.003),
+    0.08,
+    0.45
+  );
+
+  if (Math.random() >= mediationChance) return false;
+
+  conflict.severity = clamp(conflict.severity - 1, 1, 10);
+  conflict.aExhaustion = clamp(conflict.aExhaustion + 3, 0, 100);
+  conflict.bExhaustion = clamp(conflict.bExhaustion + 3, 0, 100);
+  conflict.aMobilization = clamp(conflict.aMobilization - 5, 0, 100);
+  conflict.bMobilization = clamp(conflict.bMobilization - 5, 0, 100);
+
+  addNews(`🕊️ MEDIATION: ${mediator.name} brokers de-escalation between ${a.name} and ${b.name}.`, 'major');
+  if (Math.random() < 0.35) requestCeasefire(conflict);
+  return true;
+}
+
 function evaluateWarDecision(attackerId, defenderId) {
   const a = NATIONS[attackerId];
   const b = NATIONS[defenderId];
   if (!a || !b || a.failedState || b.failedState) return { decision: 'none', reason: 'invalid' };
+  if (hasActiveTruce(attackerId, defenderId)) return { decision: 'peace', reason: 'active_truce', desire: 0 };
   
   const aScore = getWarScore(a);
   const bScore = getWarScore(b);
   const aAggression = getAggressionScore(a);
   const aDesperation = getDesperationScore(a);
+  const aReadiness = (a.militaryForces?.readiness || 50) / 100;
+  const bReadiness = (b.militaryForces?.readiness || 50) / 100;
   
   // Alliance support for defender
   const defenderAllies = GAME.alliances.filter(al => al.a === defenderId || al.b === defenderId);
@@ -151,17 +454,22 @@ function evaluateWarDecision(attackerId, defenderId) {
   
   // Power ratio (attacker advantage)
   const powerRatio = aScore / Math.max(bScore + allyStrength * 0.5, 1);
+  const deterrenceGap = Math.max(0, (bScore + allyStrength * 0.5) - aScore);
+  const fearFactor = clamp(deterrenceGap / Math.max(aScore, 1), 0, 1.5) + clamp((bReadiness - aReadiness) * 0.8, 0, 0.6);
   
   // Calculate war desire
   let warDesire = aAggression * powerRatio * randomFactor;
+  warDesire += (aReadiness - bReadiness) * 0.25;
   
   // Desperation can push nations to war (distraction) or peace
   if (aDesperation > 1 && aAggression > 0.6) warDesire += aDesperation * 0.5;
   else if (aDesperation > 1) warDesire -= aDesperation * 0.3; // desperate peaceful nations seek peace
   
-  // Existing relations (getRelation only takes player's perspective, so approximate)
-  const rel = typeof getRelation === 'function' ? getRelation(attackerId) : 0;
+  const rel = typeof getRelationBetween === 'function'
+    ? getRelationBetween(attackerId, defenderId)
+    : (typeof getRelation === 'function' ? getRelation(defenderId) : 0);
   warDesire -= rel * 0.005;
+  warDesire -= fearFactor * 0.65;
   
   // Border tension (random proxy)
   warDesire += (Math.random() - 0.5) * 0.3;
@@ -169,6 +477,11 @@ function evaluateWarDecision(attackerId, defenderId) {
   // Check if already at war
   const alreadyAtWar = GAME.conflicts.some(c => (c.a === attackerId || c.b === attackerId));
   if (alreadyAtWar) warDesire *= 0.3;
+
+  // Strong deterrence pushes weaker nations into caution.
+  if (fearFactor > 0.9 && powerRatio < 1.05) {
+    return { decision: 'peace', reason: 'deterrence', desire: warDesire };
+  }
   
   if (warDesire > 1.2 && powerRatio > 1.3) {
     return { decision: 'attack', reason: 'military_advantage', desire: warDesire };
@@ -186,6 +499,7 @@ function declareWar(attackerId, defenderId, severity = 5, goal = 'conquer') {
   const a = NATIONS[attackerId];
   const b = NATIONS[defenderId];
   if (!a || !b || a.failedState || b.failedState) return false;
+  if (hasActiveTruce(attackerId, defenderId)) return false;
   
   // Check not already in conflict
   if (GAME.conflicts.some(c => (c.a === attackerId && c.b === defenderId) || (c.a === defenderId && c.b === attackerId))) return false;
@@ -196,8 +510,8 @@ function declareWar(attackerId, defenderId, severity = 5, goal = 'conquer') {
   conflict.key = key;
   conflict.a = attackerId;
   conflict.b = defenderId;
-  conflict.type = severity >= 7 ? 'invasion' : severity >= 4 ? 'war' : 'border_skirmish';
-  conflict.severity = clamp(severity, 1, 10);
+  conflict.type = severity >= 7 ? 'invasion' : 'war';
+  conflict.severity = clamp(severity, 4, 10);
   conflict.startTurn = GAME.turn;
   conflict.startDate = new Date(GAME.date);
   conflict.aGoal = goal;
@@ -231,7 +545,9 @@ function triggerAllianceReactions(attackerId, defenderId, severity = 5) {
       const ally = NATIONS[allyId];
       if (!ally || ally.failedState) return;
       
-      const rel = typeof getRelation === 'function' ? getRelation(allyId) : 0;
+      const rel = typeof getRelationBetween === 'function'
+        ? getRelationBetween(allyId, defenderId)
+        : (typeof getRelation === 'function' ? getRelation(defenderId) : 0);
       // 60% chance allies join
       if (rel > 10 || Math.random() < 0.6) {
         const existing = GAME.conflicts.some(c => (c.a === allyId && c.b === attackerId) || (c.b === allyId && c.a === attackerId));
@@ -402,13 +718,15 @@ function resolveBattle(conflict) {
   // Economy support
   const aEconSupport = (a.gdp || 0.1) * 0.05;
   const bEconSupport = (b.gdp || 0.1) * 0.05;
+  const aEquipSupport = getActiveEquipmentPower(a) * 0.01;
+  const bEquipSupport = getActiveEquipmentPower(b) * 0.01;
   
   // Random
   const randomness = 0.5 + Math.random();
   
   // Final power
-  const aPower = (aMil * aMob * aGenBonus + aEconSupport) * (1 - aExhaustionPenalty) * (1 + techAdvantage * 0.02) * randomness;
-  const bPower = (bMil * bMob * bGenBonus + bEconSupport) * (1 - bExhaustionPenalty) * (1 - techAdvantage * 0.02) * randomness;
+  const aPower = (aMil * aMob * aGenBonus + aEconSupport + aEquipSupport) * (1 - aExhaustionPenalty) * (1 + techAdvantage * 0.02) * randomness;
+  const bPower = (bMil * bMob * bGenBonus + bEconSupport + bEquipSupport) * (1 - bExhaustionPenalty) * (1 - techAdvantage * 0.02) * randomness;
   
   const totalPower = aPower + bPower;
   const aWinChance = totalPower > 0 ? aPower / totalPower : 0.5;
@@ -474,8 +792,18 @@ function resolveBattle(conflict) {
   // Equipment losses
   const aEquipLoss = Math.floor(10 + Math.random() * 50 * battleIntensity);
   const bEquipLoss = Math.floor(10 + Math.random() * 50 * battleIntensity);
-  conflict.equipmentLost.a.total += aEquipLoss;
-  conflict.equipmentLost.b.total += bEquipLoss;
+  const aRemoved = applyBattleEquipmentLosses(a, aEquipLoss);
+  const bRemoved = applyBattleEquipmentLosses(b, bEquipLoss);
+  if (!conflict.equipmentLost.a.byType) conflict.equipmentLost.a.byType = {};
+  if (!conflict.equipmentLost.b.byType) conflict.equipmentLost.b.byType = {};
+  conflict.equipmentLost.a.total += aRemoved.total;
+  conflict.equipmentLost.b.total += bRemoved.total;
+  Object.keys(aRemoved.byType).forEach((k) => {
+    conflict.equipmentLost.a.byType[k] = (conflict.equipmentLost.a.byType[k] || 0) + aRemoved.byType[k];
+  });
+  Object.keys(bRemoved.byType).forEach((k) => {
+    conflict.equipmentLost.b.byType[k] = (conflict.equipmentLost.b.byType[k] || 0) + bRemoved.byType[k];
+  });
   
   const battleRecord = {
     turn: GAME.turn,
@@ -537,8 +865,12 @@ function applyWarEconomicEffects(conflict) {
   // Treasury drain per nation
   const aNation = NATIONS[conflict.a];
   const bNation = NATIONS[conflict.b];
-  if (aNation) aNation.treasury = Math.max(0, (aNation.treasury || 0) - (severity * 15 + warDuration * 2));
-  if (bNation) bNation.treasury = Math.max(0, (bNation.treasury || 0) - (severity * 18 + warDuration * 3));
+  const aMonthlySpend = severity * 15 + warDuration * 2;
+  const bMonthlySpend = severity * 18 + warDuration * 3;
+  if (aNation) aNation.treasury = Math.max(0, (aNation.treasury || 0) - aMonthlySpend);
+  if (bNation) bNation.treasury = Math.max(0, (bNation.treasury || 0) - bMonthlySpend);
+  conflict.moneySpent.a += aMonthlySpend;
+  conflict.moneySpent.b += bMonthlySpend;
   
   // Defense spending tracking
   if (aNation) aNation.defenseSpending = (aNation.defenseSpending || 0) + severity * 20 + warDuration * 3;
@@ -607,8 +939,7 @@ function requestCeasefire(conflict) {
   const frontAdvantage = Math.abs(conflict.frontShift);
   if (frontAdvantage > 3 && conflict.currentFront !== 'stalemate') return false;
   
-  const ceasefireThreshold = 0.4; // Peace desire over this = ceasefire
-  const peaceThreshold = 0.7;     // Higher threshold for full peace
+  const ceasefireThreshold = 0.38; // Peace desire over this = ceasefire
   
   if (aPeaceDesire > ceasefireThreshold && bPeaceDesire > ceasefireThreshold) {
     conflict.phase = 'ceasefire';
@@ -636,6 +967,7 @@ function attemptPeace(conflict) {
     const a = NATIONS[conflict.a];
     const b = NATIONS[conflict.b];
     conflict.phase = 'peace';
+    conflict.peaceTurns = 0;
     
     // Determine winner based on frontShift and casualties
     let winner = null;
@@ -652,8 +984,12 @@ function attemptPeace(conflict) {
       // Winner gets GDP boost, loser penalty
       if (winnerNation) winnerNation.gdp = clamp((winnerNation.gdp || 1) * 1.005, 0.02, 140);
       if (loserNation) loserNation.gdp = clamp((loserNation.gdp || 1) * 0.98, 0.02, 140);
+      applyWarDealsAndTruce(conflict, winner);
   } else {
       addNews(`🤝 STALEMATE: ${NATIONS[conflict.a]?.name} and ${NATIONS[conflict.b]?.name} sign a peace treaty after ${conflict.turn} turns.`, 'major');
+      createTruce(conflict.a, conflict.b, 10 + conflict.severity, 'stalemate');
+      conflict.winner = null;
+      conflict.endReason = 'stalemate';
     }
     
     // Post-war recovery
@@ -678,20 +1014,55 @@ function attemptPeace(conflict) {
 function processAllWars() {
   // Ensure GAME.conflicts is an array
   if (!GAME.conflicts) GAME.conflicts = [];
+  processTruceDecay();
   
   const finishedConflicts = [];
+
+  const normalizeLegacyConflict = (conflict) => {
+    if (!conflict || conflict.type) return conflict;
+    if (!conflict.a || !conflict.b) return null;
+
+    conflict.key = conflict.key || relationshipKey(conflict.a, conflict.b);
+    conflict.type = 'war';
+    conflict.severity = clamp(Math.round((conflict.intensity || 45) / 10), 1, 10);
+    conflict.startTurn = Number.isFinite(conflict.startTurn) ? conflict.startTurn : GAME.turn;
+    conflict.startDate = conflict.startDate || new Date(GAME.date);
+    conflict.turn = Number.isFinite(conflict.duration) ? conflict.duration : (Number.isFinite(conflict.turn) ? conflict.turn : 0);
+    conflict.phase = conflict.phase || 'active';
+    conflict.ceasefireTurns = Number.isFinite(conflict.ceasefireTurns) ? conflict.ceasefireTurns : 0;
+    conflict.ceasefireDuration = Number.isFinite(conflict.ceasefireDuration) ? conflict.ceasefireDuration : 0;
+    conflict.peaceTurns = Number.isFinite(conflict.peaceTurns) ? conflict.peaceTurns : 0;
+    conflict.battles = Array.isArray(conflict.battles) ? conflict.battles : [];
+    conflict.currentFront = conflict.currentFront || 'stalemate';
+    conflict.frontShift = Number.isFinite(conflict.frontShift) ? conflict.frontShift : 0;
+    conflict.casualties = conflict.casualties || { a_military: 0, b_military: 0, a_civilian: 0, b_civilian: 0, a_wounded: 0, b_wounded: 0 };
+    conflict.equipmentLost = conflict.equipmentLost || { a: { total: 0 }, b: { total: 0 } };
+    if (!conflict.equipmentLost.a.byType) conflict.equipmentLost.a.byType = {};
+    if (!conflict.equipmentLost.b.byType) conflict.equipmentLost.b.byType = {};
+    conflict.aExhaustion = Number.isFinite(conflict.aExhaustion) ? conflict.aExhaustion : 0;
+    conflict.bExhaustion = Number.isFinite(conflict.bExhaustion) ? conflict.bExhaustion : 0;
+    conflict.economicDamage = conflict.economicDamage || { a: 0, b: 0 };
+    conflict.moneySpent = conflict.moneySpent || { a: 0, b: 0 };
+    conflict.aMobilization = Number.isFinite(conflict.aMobilization) ? conflict.aMobilization : 50;
+    conflict.bMobilization = Number.isFinite(conflict.bMobilization) ? conflict.bMobilization : 50;
+    conflict.aGoal = conflict.aGoal || 'defend';
+    conflict.bGoal = conflict.bGoal || 'defend';
+    conflict.lastEscalationTurn = Number.isFinite(conflict.lastEscalationTurn) ? conflict.lastEscalationTurn : GAME.turn;
+    conflict.warDeals = Array.isArray(conflict.warDeals) ? conflict.warDeals : [];
+    if (conflict.winner === undefined) conflict.winner = null;
+    if (!conflict.endReason) conflict.endReason = null;
+    return conflict;
+  };
   
   for (let i = GAME.conflicts.length - 1; i >= 0; i--) {
-    const conflict = GAME.conflicts[i];
-    
-    // Skip conflicts that don't have war.js fields (old-format from game.js's declareConflict)
-    if (!conflict.type) continue;
+    const conflict = normalizeLegacyConflict(GAME.conflicts[i]);
+    if (!conflict) continue;
     
     conflict.turn++;
     
     if (conflict.phase === 'peace') {
-      // Remove after some turns of peace
-      if (conflict.turn > conflict.startTurn + 6) {
+      conflict.peaceTurns = (conflict.peaceTurns || 0) + 1;
+      if (conflict.peaceTurns > 6) {
         finishedConflicts.push(i);
       }
       continue;
@@ -720,15 +1091,30 @@ function processAllWars() {
     
     // 2. Apply economic effects
     applyWarEconomicEffects(conflict);
+
+    // 2.5. Wartime procurement and industrial mobilization
+    const severity = conflict.severity / 10;
+    triggerWarProcurement(NATIONS[conflict.a], severity);
+    triggerWarProcurement(NATIONS[conflict.b], severity);
     
     // 3. Escalation
     if (GAME.turn - conflict.lastEscalationTurn > 3) {
       escalateConflict(conflict);
     }
+
+    // 3.5. Great-power mediation attempts in prolonged wars
+    if (conflict.turn > 4 && Math.random() < 0.12) {
+      attemptGreatPowerMediation(conflict);
+    }
     
     // 4. Check for ceasefire
     if (conflict.turn > 3 && Math.random() < 0.1) {
       requestCeasefire(conflict);
+    }
+
+    // 4.5. Surrender checks in prolonged decisive wars
+    if (trySurrender(conflict)) {
+      continue;
     }
     
     // 5. Check for AI war exhaustion / peace
@@ -744,6 +1130,7 @@ function processAllWars() {
   
   // Remove finished conflicts (indexes stored in reverse order)
   for (const idx of finishedConflicts.sort((a, b) => b - a)) {
+    archiveConflict(GAME.conflicts[idx]);
     GAME.conflicts.splice(idx, 1);
   }
 }
@@ -773,6 +1160,7 @@ function processAIWarDecisions() {
     // Find a valid target
     const potentialTargets = nationIds.filter(targetId => {
       if (targetId === attackerId) return false;
+      if (hasActiveTruce(attackerId, targetId)) return false;
       // Don't attack allies
       if (GAME.alliances?.some(al => (al.a === attackerId && al.b === targetId) || (al.b === attackerId && al.a === targetId))) return false;
       // Not already at war
@@ -787,14 +1175,19 @@ function processAIWarDecisions() {
     const evalResult = evaluateWarDecision(attackerId, defenderId);
     
     if (evalResult.decision === 'attack') {
-      const severity = Math.floor(3 + Math.random() * 5); // 3-7 severity
+      const severity = Math.floor(4 + Math.random() * 5); // 4-8 severity, no border wars
       const goal = Math.random() < 0.3 ? 'annex' : Math.random() < 0.5 ? 'conquer' : 'punish';
       declareWar(attackerId, defenderId, severity, goal);
       warsDeclared++;
-    } else if (evalResult.decision === 'provoke' && Math.random() < 0.3) {
-      // Border skirmish
-      declareWar(attackerId, defenderId, 2 + Math.floor(Math.random() * 2), 'punish');
-      warsDeclared++;
+    } else if (evalResult.decision === 'provoke' && Math.random() < 0.4) {
+      // Diplomatic pressure instead of border skirmish warfare
+      if (typeof getRelationBetween === 'function') {
+        const rel = getRelationBetween(attackerId, defenderId);
+        const key = relationshipKey(attackerId, defenderId);
+        if (!GAME.bilateralRelations) GAME.bilateralRelations = {};
+        GAME.bilateralRelations[key] = clamp(rel - 4, -100, 100);
+      }
+      addNews(`🧭 DIPLOMATIC CRISIS: ${NATIONS[attackerId]?.name} escalates pressure on ${NATIONS[defenderId]?.name}, but war is avoided for now.`, 'minor');
     }
   }
 }
@@ -805,6 +1198,7 @@ function processAIWarDecisions() {
 
 function initWarSystem() {
   if (!GAME.conflicts) GAME.conflicts = [];
+  if (!GAME.truces) GAME.truces = {};
   
   // Randomly generate 1-3 initial low-level conflicts
   const numInitialConflicts = Math.floor(1 + Math.random() * 3);
@@ -821,7 +1215,7 @@ function initWarSystem() {
     const id2 = nationIds.splice(idx2, 1)[0];
     
     if (id1 && id2) {
-      declareWar(id1, id2, 2 + Math.floor(Math.random() * 4), Math.random() < 0.5 ? 'conquer' : 'punish');
+      declareWar(id1, id2, 4 + Math.floor(Math.random() * 4), Math.random() < 0.5 ? 'conquer' : 'punish');
     }
   }
 }
@@ -834,11 +1228,13 @@ function renderConflictSummary(conflict) {
   const a = NATIONS[conflict.a];
   const b = NATIONS[conflict.b];
   if (!a || !b) return '<div class="war-card invalid">Invalid conflict data</div>';
-  
-  const totalCasualties = conflict.casualties.a_military + conflict.casualties.b_military;
-  const totalCivCasualties = conflict.casualties.a_civilian + conflict.casualties.b_civilian;
-  const frontIcon = conflict.currentFront === 'stalemate' ? '⚖️' : conflict.currentFront === 'a_advancing' ? '➡️' : conflict.currentFront === 'b_advancing' ? '⬅️' : '🔀';
-  
+
+  const totalCasualties = (conflict.casualties?.a_military || 0) + (conflict.casualties?.b_military || 0);
+  const totalCivCasualties = (conflict.casualties?.a_civilian || 0) + (conflict.casualties?.b_civilian || 0);
+  const chances = estimateWinChances(conflict);
+  const aLostTypes = summarizeLossTypes(conflict.equipmentLost?.a?.byType || {});
+  const bLostTypes = summarizeLossTypes(conflict.equipmentLost?.b?.byType || {});
+
   return `
     <div class="war-card ${conflict.phase}">
       <div class="war-card-header">
@@ -852,10 +1248,14 @@ function renderConflictSummary(conflict) {
         <span class="belligerent ${conflict.frontShift > 0 ? 'winning' : ''}">${b.flag} ${b.name}</span>
       </div>
       <div class="war-card-stats">
-        <span>${frontIcon} Front: ${conflict.currentFront.replace('_', ' ')}</span>
+        <span>⚖️ Front: ${conflict.currentFront.replace('_', ' ')}</span>
+        <span>🏁 Win Odds: ${a.name} ${chances.aPct}% • ${b.name} ${chances.bPct}%</span>
         <span>💀 Military: ${totalCasualties.toLocaleString()}</span>
         <span>👶 Civilian: ${totalCivCasualties.toLocaleString()}</span>
         <span>⏱️ Turn ${conflict.turn}</span>
+        <span>💸 Spending: ${a.name} $${Math.round(conflict.moneySpent?.a || 0).toLocaleString()}M • ${b.name} $${Math.round(conflict.moneySpent?.b || 0).toLocaleString()}M</span>
+        <span>🧨 Tanks/Arms Lost: ${a.name} ${(conflict.equipmentLost?.a?.total || 0).toLocaleString()} (${aLostTypes || 'n/a'})</span>
+        <span>🧨 Tanks/Arms Lost: ${b.name} ${(conflict.equipmentLost?.b?.total || 0).toLocaleString()} (${bLostTypes || 'n/a'})</span>
       </div>
       <div class="war-card-exhaustion">
         <div class="exhaustion-bar"><label>${a.name} Exhaustion</label><div class="bar-bg"><div class="bar-fill" style="width:${conflict.aExhaustion}%"></div></div></div>
@@ -870,6 +1270,67 @@ function renderAllConflicts() {
     return '<div class="war-panel-empty">🌍 No active conflicts</div>';
   }
   return GAME.conflicts.map(c => renderConflictSummary(c)).join('');
+}
+
+function renderEndedWarCard(war) {
+  const a = NATIONS[war.a];
+  const b = NATIONS[war.b];
+  const aName = a?.name || war.a;
+  const bName = b?.name || war.b;
+  const aFlag = a?.flag || '🏳️';
+  const bFlag = b?.flag || '🏳️';
+  const winnerName = war.winner ? (NATIONS[war.winner]?.name || war.winner) : 'No clear winner';
+  const deals = (war.warDeals || []).length ? war.warDeals.join(', ') : 'none';
+  const aLossTypes = summarizeLossTypes(war.equipmentLost?.a?.byType || {});
+  const bLossTypes = summarizeLossTypes(war.equipmentLost?.b?.byType || {});
+
+  return `
+    <div class="war-card peace">
+      <div class="war-card-header">
+        <span class="war-type-badge">ENDED ${String(war.type || 'war').toUpperCase()}</span>
+        <span class="war-phase">${String(war.endReason || 'peace').toUpperCase()}</span>
+      </div>
+      <div class="war-card-belligerents">
+        <span class="belligerent">${aFlag} ${aName}</span>
+        <span class="vs">vs</span>
+        <span class="belligerent">${bFlag} ${bName}</span>
+      </div>
+      <div class="war-card-stats">
+        <span>🏆 Winner: ${winnerName}</span>
+        <span>⏱️ Duration: ${war.duration || 0} turns</span>
+        <span>💀 Military: ${((war.casualties?.a_military || 0) + (war.casualties?.b_military || 0)).toLocaleString()}</span>
+        <span>💸 Spending: ${aName} $${Math.round(war.moneySpent?.a || 0).toLocaleString()}M • ${bName} $${Math.round(war.moneySpent?.b || 0).toLocaleString()}M</span>
+        <span>🧨 ${aName} lost ${(war.equipmentLost?.a?.total || 0).toLocaleString()} (${aLossTypes || 'n/a'})</span>
+        <span>🧨 ${bName} lost ${(war.equipmentLost?.b?.total || 0).toLocaleString()} (${bLossTypes || 'n/a'})</span>
+        <span>📜 War Deals: ${deals}</span>
+      </div>
+    </div>
+  `;
+}
+
+function renderWarCommandTab() {
+  ensureWarArchive();
+  const active = GAME.conflicts || [];
+  const ended = GAME.warHistory || [];
+
+  return `
+    <div class="tab-section">
+      <h3>War Theater</h3>
+      <div class="resource-grid">
+        <div class="resource-item"><span class="r-name">Active Wars</span><span class="r-val ${active.length ? 'negative' : 'positive'}">${active.length}</span></div>
+        <div class="resource-item"><span class="r-name">Ended Wars</span><span class="r-val">${ended.length}</span></div>
+        <div class="resource-item"><span class="r-name">Active Truces</span><span class="r-val">${Object.keys(GAME.truces || {}).length}</span></div>
+      </div>
+    </div>
+    <div class="tab-section">
+      <h3>Active War Cards</h3>
+      ${active.length ? active.map((c) => renderConflictSummary(c)).join('') : '<div class="section-card"><p class="empty">No active wars.</p></div>'}
+    </div>
+    <div class="tab-section">
+      <h3>Ended War Cards</h3>
+      ${ended.length ? ended.slice(0, 20).map((w) => renderEndedWarCard(w)).join('') : '<div class="section-card"><p class="empty">No ended wars archived yet.</p></div>'}
+    </div>
+  `;
 }
 
 // ============================================================
@@ -898,3 +1359,4 @@ window.processAIWarDecisions = processAIWarDecisions;
 window.initWarSystem = initWarSystem;
 window.renderConflictSummary = renderConflictSummary;
 window.renderAllConflicts = renderAllConflicts;
+window.renderWarCommandTab = renderWarCommandTab;
