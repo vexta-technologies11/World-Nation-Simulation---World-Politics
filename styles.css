@@ -833,6 +833,646 @@ html, body {
 .relation-score.positive { color: var(--accent-green); }
 .relation-score.negative { color: var(--accent-red); }
 
+/* Diplomacy Summary in Nation Card */
+.nation-diplomacy-summary {
+  margin: 8px 0;
+  padding: 8px;
+  background: rgba(9, 28, 54, 0.42);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+}
+
+.diplomacy-summary-header {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.diplomacy-summary-item {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-bottom: 1px solid rgba(84, 140, 196, 0.1);
+  color: var(--text-primary);
+}
+
+.diplomacy-summary-item:last-child { border-bottom: none; }
+.diplomacy-summary-item.positive { color: var(--accent-green); }
+.diplomacy-summary-item.negative { color: var(--accent-red); }
+
+/* Diplomacy Event Items */
+.diplomacy-event-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 8px;
+  border-bottom: 1px solid rgba(84, 140, 196, 0.1);
+  font-size: 11px;
+}
+
+.diplomacy-event-item:last-child { border-bottom: none; }
+
+/* Diplomacy Detail Items */
+.diplomacy-detail-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 8px;
+  border-bottom: 1px solid rgba(84, 140, 196, 0.1);
+  font-size: 11px;
+}
+
+.diplomacy-detail-item:last-child { border-bottom: none; }
+
+/* World Bank UI */
+.worldbank-loan-item {
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(84, 140, 196, 0.1);
+  font-size: 11px;
+  background: rgba(9, 28, 54, 0.3);
+  border-radius: 4px;
+  margin-bottom: 4px;
+}
+
+.worldbank-loan-item:last-child { border-bottom: none; }
+
+/* World Bank Navigation */
+.wb-nav-btn {
+  padding: 6px 12px;
+  border: 1px solid var(--border-color);
+  background: rgba(9, 28, 54, 0.4);
+  color: var(--text-secondary);
+  border-radius: 6px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.wb-nav-btn:hover {
+  background: rgba(84, 140, 196, 0.15);
+  color: var(--text-primary);
+}
+
+.wb-nav-btn.active {
+  background: rgba(84, 140, 196, 0.25);
+  color: var(--accent-blue);
+  border-color: var(--accent-blue);
+}
+
+.wb-filter-btn {
+  padding: 4px 8px;
+  border: 1px solid rgba(84, 140, 196, 0.2);
+  background: rgba(9, 28, 54, 0.3);
+  color: var(--text-secondary);
+  border-radius: 4px;
+  font-size: 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.wb-filter-btn:hover {
+  background: rgba(84, 140, 196, 0.15);
+  color: var(--text-primary);
+}
+
+/* World Bank Nation Row */
+.wb-nation-row {
+  display: grid;
+  grid-template-columns: 32px 28px 1.2fr 0.8fr 1fr 1fr;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(84, 140, 196, 0.1);
+  font-size: 11px;
+  align-items: center;
+  transition: background 0.15s ease;
+}
+
+.wb-nation-row:hover {
+  background: var(--bg-hover);
+}
+
+.wb-rank {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.wb-flag {
+  font-size: 16px;
+}
+
+.wb-name {
+  font-weight: 600;
+}
+
+.wb-rating {
+  font-weight: 700;
+  font-size: 10px;
+}
+
+.wb-amount, .wb-paid, .wb-interest {
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+/* World Bank Transaction Row */
+.wb-txn-row {
+  display: grid;
+  grid-template-columns: 24px 2fr 0.8fr 60px;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(84, 140, 196, 0.08);
+  font-size: 10px;
+  align-items: center;
+  transition: background 0.15s ease;
+}
+
+.wb-txn-row:hover {
+  background: var(--bg-hover);
+}
+
+.wb-txn-icon {
+  font-size: 14px;
+}
+
+.wb-txn-details {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-txn-amount {
+  font-weight: 600;
+  text-align: right;
+}
+
+.wb-txn-turn {
+  color: var(--text-muted);
+  text-align: right;
+}
+
+/* World Bank Loan Card */
+.wb-loan-card {
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  background: rgba(9, 28, 54, 0.35);
+  transition: all 0.15s ease;
+}
+
+.wb-loan-card:hover {
+  border-color: var(--accent-blue);
+  background: rgba(84, 140, 196, 0.1);
+}
+
+.wb-loan-card.wb-loan-closed {
+  opacity: 0.75;
+}
+
+.wb-loan-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.wb-loan-borrower {
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.wb-loan-status {
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.wb-loan-amount {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--accent-blue);
+  margin: 4px 0;
+}
+
+.wb-loan-terms {
+  font-size: 10px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.wb-loan-progress-bar {
+  height: 6px;
+  background: rgba(84, 140, 196, 0.15);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.wb-loan-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-blue), var(--accent-green));
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.wb-loan-progress-text {
+  font-size: 9px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.wb-loan-lenders {
+  font-size: 9px;
+  color: var(--text-secondary);
+}
+
+.wb-loan-collateral {
+  font-size: 9px;
+  color: var(--accent-yellow);
+  margin-top: 2px;
+}
+
+/* World Bank Loan Detail */
+.wb-loan-detail-card {
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: rgba(9, 28, 54, 0.35);
+}
+
+.wb-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.wb-detail-borrower {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.wb-detail-status {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.wb-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.wb-detail-item {
+  padding: 6px 8px;
+  background: rgba(9, 28, 54, 0.5);
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wb-detail-label {
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.wb-detail-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.wb-detail-value.positive { color: var(--accent-green); }
+.wb-detail-value.negative { color: var(--accent-red); }
+
+.wb-detail-progress {
+  margin-top: 8px;
+}
+
+.wb-detail-progress-bar {
+  height: 8px;
+  background: rgba(84, 140, 196, 0.15);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.wb-detail-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-blue), var(--accent-green));
+  border-radius: 4px;
+}
+
+.wb-detail-progress-text {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-align: center;
+  margin-top: 4px;
+}
+
+/* World Bank Lender Row */
+.wb-lender-row {
+  display: grid;
+  grid-template-columns: 24px 1fr 50px 80px 80px 80px;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(84, 140, 196, 0.1);
+  font-size: 10px;
+  align-items: center;
+}
+
+.wb-lender-flag { font-size: 14px; }
+.wb-lender-name { font-weight: 600; }
+.wb-lender-share { color: var(--text-muted); text-align: center; }
+.wb-lender-amount { text-align: right; }
+.wb-lender-received { text-align: right; color: var(--text-secondary); }
+.wb-lender-profit { text-align: right; font-weight: 600; }
+
+/* World Bank Collateral Row */
+.wb-collateral-row {
+  display: grid;
+  grid-template-columns: 1fr 2fr 80px;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(84, 140, 196, 0.1);
+  font-size: 10px;
+  align-items: center;
+}
+
+.wb-collateral-type { font-weight: 700; color: var(--accent-yellow); }
+.wb-collateral-desc { color: var(--text-secondary); }
+.wb-collateral-value { text-align: right; font-weight: 600; }
+
+/* World Bank Back Button */
+.wb-back-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--border-color);
+  background: rgba(9, 28, 54, 0.4);
+  color: var(--text-secondary);
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  margin-bottom: 8px;
+  transition: all 0.15s ease;
+}
+
+.wb-back-btn:hover {
+  background: rgba(84, 140, 196, 0.15);
+  color: var(--text-primary);
+}
+
+/* World Bank Proposal Card */
+.wb-proposal-card {
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  margin-bottom: 10px;
+  background: rgba(9, 28, 54, 0.35);
+}
+
+.wb-proposal-card.wb-proposal-other {
+  opacity: 0.8;
+}
+
+.wb-proposal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.wb-proposal-status {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.wb-proposal-turn {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.wb-proposal-nation {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.wb-proposal-details {
+  padding: 8px;
+  background: rgba(9, 28, 54, 0.4);
+  border-radius: 6px;
+  margin-bottom: 8px;
+}
+
+.wb-proposal-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+  font-size: 11px;
+  border-bottom: 1px solid rgba(84, 140, 196, 0.08);
+}
+
+.wb-proposal-row:last-child { border-bottom: none; }
+
+.wb-proposal-label {
+  color: var(--text-secondary);
+}
+
+.wb-proposal-value {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.wb-proposal-reason {
+  padding: 8px;
+  background: rgba(84, 140, 196, 0.08);
+  border-radius: 6px;
+  margin-bottom: 8px;
+  border-left: 3px solid var(--accent-blue);
+}
+
+.wb-proposal-reason-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-blue);
+  margin-bottom: 4px;
+}
+
+.wb-proposal-reason-text {
+  font-size: 10px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.wb-proposal-counter {
+  padding: 8px;
+  background: rgba(255, 193, 7, 0.08);
+  border-radius: 6px;
+  margin-bottom: 8px;
+  border-left: 3px solid var(--accent-yellow);
+}
+
+.wb-proposal-counter-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-yellow);
+  margin-bottom: 6px;
+}
+
+.wb-proposal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.wb-accept-btn, .wb-counter-btn {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.wb-accept-btn {
+  background: var(--accent-green);
+  color: #000;
+}
+
+.wb-accept-btn:hover {
+  background: #4caf50;
+}
+
+.wb-counter-btn {
+  background: var(--accent-yellow);
+  color: #000;
+}
+
+.wb-counter-btn:hover {
+  background: #ffc107;
+}
+
+.wb-proposal-decline {
+  padding: 8px;
+  background: rgba(244, 67, 54, 0.08);
+  border-radius: 6px;
+  margin-bottom: 8px;
+  border-left: 3px solid var(--accent-red);
+}
+
+.wb-proposal-decline-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent-red);
+  margin-bottom: 4px;
+}
+
+.wb-proposal-decline-reason {
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.wb-proposal-cooldown {
+  font-size: 10px;
+  color: var(--accent-yellow);
+  margin-top: 4px;
+}
+
+.wb-proposal-history {
+  padding: 8px;
+  background: rgba(9, 28, 54, 0.4);
+  border-radius: 6px;
+  margin-top: 8px;
+}
+
+.wb-proposal-history-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.wb-proposal-history-row {
+  font-size: 9px;
+  color: var(--text-muted);
+  padding: 2px 0;
+  border-bottom: 1px solid rgba(84, 140, 196, 0.05);
+}
+
+/* World Bank Form */
+.wb-form-info {
+  padding: 10px;
+  background: rgba(9, 28, 54, 0.4);
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.wb-form-info-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  font-size: 11px;
+  border-bottom: 1px solid rgba(84, 140, 196, 0.08);
+}
+
+.wb-form-info-row:last-child { border-bottom: none; }
+
+.wb-form-info-label {
+  color: var(--text-secondary);
+}
+
+.wb-form-info-value {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.wb-loan-form {
+  padding: 12px;
+  background: rgba(9, 28, 54, 0.3);
+  border-radius: 8px;
+}
+
+.wb-form-group {
+  margin-bottom: 12px;
+}
+
+.wb-form-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.wb-form-hint {
+  font-size: 9px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.wb-form-actions {
+  margin-top: 16px;
+}
+
+.wb-submit-btn {
+  width: 100%;
+  padding: 10px 16px;
+  background: var(--accent-blue);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.wb-submit-btn:hover {
+  background: #4a9fd4;
+}
+
 /* History & Leaderboard */
 .history-controls {
   margin-bottom: 10px;

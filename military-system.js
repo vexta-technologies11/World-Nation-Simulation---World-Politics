@@ -94,10 +94,23 @@ const DEFENSE_COMPANIES = [
   { id: "co_52", name: "Onyx Naval Systems", desc: "Mine warfare and undersea defense", foundedBy: null, foundedTurn: null, tier: 1, techLevel: 1.0, equipment: [], researchFocus: null, researchProgress: 0 }
 ];
 
+const _DC_FOUNDING_TIERS = {
+  co_01: 4, co_02: 2, co_03: 2, co_04: 4, co_05: 5, co_06: 1, co_07: 5, co_08: 2, co_09: 2, co_10: 5,
+  co_11: 3, co_12: 5, co_13: 2, co_14: 3, co_15: 3, co_16: 3, co_17: 3, co_18: 1, co_19: 3, co_20: 3,
+  co_21: 4, co_22: 3, co_23: 5, co_24: 2, co_25: 3, co_26: 3, co_27: 3, co_28: 5, co_29: 3, co_30: 2,
+  co_31: 4, co_32: 5, co_33: 2, co_34: 4, co_35: 4, co_36: 1, co_37: 2, co_38: 2, co_39: 4, co_40: 3,
+  co_41: 3, co_42: 4, co_43: 1, co_44: 2, co_45: 3, co_46: 1, co_47: 5, co_48: 4, co_49: 2, co_50: 5,
+  co_51: 1, co_52: 3,
+};
+
+DEFENSE_COMPANIES.forEach(company => {
+  company.foundingTier = _DC_FOUNDING_TIERS[company.id] || 3;
+});
+
 
 // ─── EQUIPMENT TEMPLATES BY ERA ──────────────────────
 // 500+ equipment items across 8 eras. Each has power (combat strength),
-// cost (in $B to produce), techReq (minimum tech level), cat, and era.
+// cost (in $M to produce), techReq (minimum tech level), cat, and era.
 const EQUIPMENT_TEMPLATES = {};
 
 // ── ERA 1: Great War (WW1) ─────────────────────────────
@@ -623,7 +636,102 @@ function findEquipmentTemplate(name, category) {
   return null;
 }
 
+function getDefenseInputRecipe(category, techReq) {
+  const recipes = {
+    rifle: {
+      products: { steel: 0.002, gunpowder: 0.0022, explosives: 0.0005 },
+      resources: { minerals: 0.0008 },
+    },
+    tank: {
+      products: { steel: 2.8, armor_composites: 1.5, chips: 0.8, guidance_electronics: 0.45, refined_fuel: 1.2, explosives: 0.7 },
+      resources: { rareEarth: 0.45, minerals: 0.55 },
+    },
+    ifv: {
+      products: { steel: 1.2, armor_composites: 0.6, chips: 0.35, refined_fuel: 0.5, explosives: 0.2 },
+      resources: { rareEarth: 0.2, minerals: 0.3 },
+    },
+    artillery: {
+      products: { steel: 1.0, gunpowder: 0.25, explosives: 0.45, industrial_machinery: 0.3 },
+      resources: { minerals: 0.28 },
+    },
+    missile: {
+      products: { steel: 0.08, explosives: 0.10, chips: 0.06, guidance_electronics: 0.10, refined_fuel: 0.08 },
+      resources: { rareEarth: 0.05 },
+    },
+    drone: {
+      products: { steel: 0.05, chips: 0.09, guidance_electronics: 0.08, battery_cells: 0.05 },
+      resources: { rareEarth: 0.07 },
+    },
+    fighter: {
+      products: { steel: 1.7, armor_composites: 1.2, chips: 1.2, guidance_electronics: 1.0, refined_fuel: 1.6, industrial_machinery: 0.8 },
+      resources: { rareEarth: 0.75, minerals: 0.4 },
+    },
+    bomber: {
+      products: { steel: 2.3, armor_composites: 1.6, chips: 1.0, guidance_electronics: 1.1, refined_fuel: 1.8 },
+      resources: { rareEarth: 0.8, minerals: 0.5 },
+    },
+    helicopter: {
+      products: { steel: 0.9, armor_composites: 0.5, chips: 0.5, guidance_electronics: 0.35, refined_fuel: 0.65 },
+      resources: { rareEarth: 0.28, minerals: 0.2 },
+    },
+    transport: {
+      products: { steel: 0.85, chips: 0.25, refined_fuel: 0.7, industrial_machinery: 0.35 },
+      resources: { minerals: 0.25 },
+    },
+    destroyer: {
+      products: { steel: 4.5, armor_composites: 2.1, chips: 1.8, guidance_electronics: 1.5, refined_fuel: 2.6, industrial_machinery: 1.2 },
+      resources: { rareEarth: 1.15, minerals: 1.2 },
+    },
+    submarine: {
+      products: { steel: 4.0, armor_composites: 2.5, chips: 2.0, guidance_electronics: 1.7, refined_fuel: 2.2 },
+      resources: { rareEarth: 1.4, minerals: 1.0 },
+    },
+    carrier: {
+      products: { steel: 9.0, armor_composites: 4.0, chips: 3.0, guidance_electronics: 2.6, refined_fuel: 4.8, industrial_machinery: 2.8 },
+      resources: { rareEarth: 2.4, minerals: 2.6 },
+    },
+    patrol: {
+      products: { steel: 0.7, chips: 0.2, refined_fuel: 0.5, industrial_machinery: 0.2 },
+      resources: { minerals: 0.2 },
+    },
+    satellite: {
+      products: { steel: 0.2, chips: 1.8, guidance_electronics: 1.8, battery_cells: 1.0, armor_composites: 0.2 },
+      resources: { rareEarth: 1.8, minerals: 0.35 },
+    },
+  };
+  const base = recipes[category] || { products: {}, resources: {} };
+  const techScale = clamp(0.55 + (Number(techReq || 1) * 0.04), 0.50, 1.0);
+  const out = { products: {}, resources: {} };
+  Object.entries(base.products || {}).forEach(([id, qty]) => {
+    out.products[id] = Number(qty) * techScale;
+  });
+  Object.entries(base.resources || {}).forEach(([id, qty]) => {
+    out.resources[id] = Number(qty) * techScale;
+  });
+  return out;
+}
+
+function scaleDefenseInputRecipe(recipe, scale) {
+  const normalizedScale = Math.max(1, Number(scale) || 1);
+  const effectiveScale = Math.pow(normalizedScale, 0.82);
+  const bulkDiscount = clamp(1.05 - Math.log10(normalizedScale + 9) * 0.22, 0.55, 1.0);
+  const result = { products: {}, resources: {} };
+  Object.entries(recipe.products || {}).forEach(([id, qty]) => {
+    result.products[id] = Number(qty) * effectiveScale * bulkDiscount;
+  });
+  Object.entries(recipe.resources || {}).forEach(([id, qty]) => {
+    result.resources[id] = Number(qty) * effectiveScale * bulkDiscount;
+  });
+  return result;
+}
+
 // ─── COMPANY RESEARCH ──────────────────────────────────
+
+// Calculate research cost multiplier based on tier (makes higher tiers exponentially slower)
+function getResearchCostMultiplier(tier) {
+  // Tier 1: 1.0x, Tier 5: 2.0x, Tier 10: 4.5x
+  return 1 + (tier - 1) * 0.35;
+}
 
 // Process company research each turn
 function processCompanyResearch(company, nation, isPlayer = false) {
@@ -645,7 +753,7 @@ function processCompanyResearch(company, nation, isPlayer = false) {
   const target = categoryItems.find(item => !alreadyHas.has(item.name) && item.techReq <= company.techLevel);
   
   if (!target) {
-    // All items in this category researched - upgrade tier
+    // All items in this category researched - upgrade tier (breakthrough)
     company.researchFocus = null;
     company.researchProgress = 0;
     company.tier = Math.min(10, company.tier + 1);
@@ -661,12 +769,14 @@ function processCompanyResearch(company, nation, isPlayer = false) {
   
   const researchSpeed = 0.5 * eduBoost * govBoost * budgetBoost * techBoost;
   company.researchProgress += researchSpeed;
+  company.totalResearchCost = (company.totalResearchCost || 0) + researchSpeed; // track cumulative R&D spend
   
-  // Check if research complete
-  const cost = target.cost * 2; // Research cost is 2x production cost
+  // Check if research complete (with tier-based cost multiplier)
+  const tierMultiplier = getResearchCostMultiplier(company.tier);
+  const cost = target.cost * 2 * tierMultiplier; // Research cost scales with tier
   if (company.researchProgress >= cost) {
     if (!company.equipment) company.equipment = [];
-    company.equipment.push({...target, produced: 0, id: `${company.id}_${target.name.replace(/\s+/g, '_')}`});
+    company.equipment.push({...target, produced: 0, id: `${company.id}_${target.name.replace(/\s+/g, '_')}`, tierUnlockedAt: company.tier});
     company.researchProgress = 0;
     
     // Add news if player
@@ -682,23 +792,76 @@ function processCompanyResearch(company, nation, isPlayer = false) {
 // Internal production function used by both AI and UI
 function _produceEquipInternal(company, equipmentId, quantity, nation, isPlayer) {
   const eq = company.equipment?.find(e => e.id === equipmentId);
-  if (!eq) return false;
+  if (!eq) return 0;
   
   const template = findEquipmentTemplate(eq.name, eq.cat);
-  if (!template) return false;
+  if (!template) return 0;
+
+  const requestQty = Math.max(0, Math.floor(Number(quantity || 0)));
+  if (requestQty <= 0) return 0;
+
+  const displayUnitsRequested = Math.max(1, getDisplayQuantity(eq.cat, requestQty));
+  const recipe = getDefenseInputRecipe(eq.cat, template.techReq || company.techLevel || 1);
+  const scaledRecipe = scaleDefenseInputRecipe(recipe, displayUnitsRequested);
+
+  let materialCoverage = 1;
+  let materialCost = 0;
+  let shortages = [];
+  if (typeof acquireDefenseInputMaterials === 'function') {
+    const procurement = acquireDefenseInputMaterials(nation, company, scaledRecipe);
+    materialCoverage = clamp(Number(procurement.coverage || 0), 0, 1);
+    materialCost = Math.max(0, Number(procurement.totalCost || 0));
+    shortages = Array.isArray(procurement.shortage) ? procurement.shortage : [];
+    company.lastProcurement = procurement;
+    company.procurementSpend = Number(company.procurementSpend || 0) + materialCost;
+    const supplierVolumes = {};
+    (procurement.procurement || []).forEach((entry) => {
+      // Extract actual company name from the "from" field (format: "flag CompanyName" or "flag nation CompanyName")
+      const from = entry?.from || 'unknown';
+      // Skip the flag emoji (first part), take everything after it
+      const parts = from.split(' ');
+      // If format is "flag CompanyName", take parts[1]
+      // If format is "flag nation CompanyName", take parts[2:]
+      // If format is just a name, take it as-is
+      let companyName = 'Unknown';
+      if (parts.length === 1) {
+        companyName = parts[0];
+      } else if (parts.length === 2) {
+        companyName = parts[1];
+      } else if (parts.length >= 3) {
+        companyName = parts.slice(2).join(' ');
+      }
+      const key = companyName || 'Unknown';
+      supplierVolumes[key] = (supplierVolumes[key] || 0) + Math.max(0, Number(entry?.units || 0));
+    });
+    company.supplierRelations = Object.entries(supplierVolumes)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([name, units]) => ({ name, units }));
+  }
+
+  const producibleQty = Math.max(0, Math.floor(requestQty * materialCoverage));
+  if (producibleQty <= 0) {
+    if (isPlayer) {
+      addNews(`⚠ ${company.name} cannot produce ${eq.name}: missing industrial inputs.`, 'minor');
+    }
+    return 0;
+  }
   
-  const totalCost = template.cost * quantity;
+  const manufacturingCost = getEquipmentUnitCost(template, eq.cat) * producibleQty;
+  const procurementCost = materialCost * (producibleQty / Math.max(1, requestQty));
+  const totalCost = manufacturingCost + procurementCost;
   
   if (isPlayer && typeof GAME !== 'undefined' && GAME.treasury < totalCost) {
     addNews('⚠ Insufficient funds for production!', 'minor');
-    return false;
+    return 0;
   }
   
   if (isPlayer && typeof GAME !== 'undefined') {
     GAME.treasury -= totalCost;
   }
   
-  eq.produced = (eq.produced || 0) + quantity;
+  eq.produced = (eq.produced || 0) + producibleQty;
   
   // Add to nation's military stockpile
   if (!nation.militaryStockpile) nation.militaryStockpile = {};
@@ -706,20 +869,30 @@ function _produceEquipInternal(company, equipmentId, quantity, nation, isPlayer)
   
   const existing = nation.militaryStockpile[eq.cat].find(s => s.name === eq.name);
   if (existing) {
-    existing.quantity = (existing.quantity || 1) + quantity;
+    existing.quantity = (existing.quantity || 1) + producibleQty;
     existing.condition = Math.max(existing.condition || 100, 100);
   } else {
     nation.militaryStockpile[eq.cat].push({
       ...eq,
-      quantity: quantity,
+      quantity: producibleQty,
       condition: 100,
+      companyTier: company.tier,  // Track which tier unlocked this equipment
+      producedByCompany: company.id,  // Track source company
     });
+  }
+
+  const shortfallQty = Math.max(0, requestQty - producibleQty);
+  if (shortfallQty > 0) {
+    company.unmetMaterialDemand = Number(company.unmetMaterialDemand || 0) + shortfallQty;
   }
   
   if (isPlayer) {
-    addNews(`✅ Produced ${quantity}x ${eq.name}`, 'minor');
+    addNews(`✅ Produced ${formatEquipmentDisplayQuantity(eq.cat, producibleQty)} ${eq.name}`, 'minor');
+    if (shortfallQty > 0 || shortages.length > 0) {
+      addNews(`⚠ ${company.name} partial output due to input shortages (${formatEquipmentDisplayQuantity(eq.cat, shortfallQty)} deferred).`, 'minor');
+    }
   }
-  return true;
+  return producibleQty;
 }
 
 // ─── COMPANY FOUNDING ─────────────────────────────────
@@ -772,6 +945,209 @@ function foundDefenseCompany(nation, companyIndex) {
   return true;
 }
 
+const DEFENSE_FOUNDING_THRESHOLDS = [
+  { tier: 1, education: 20, score: 0.16 },
+  { tier: 2, education: 30, score: 0.28 },
+  { tier: 3, education: 40, score: 0.42 },
+  { tier: 4, education: 52, score: 0.58 },
+  { tier: 5, education: 62, score: 0.72 },
+];
+
+function _dcHash(input) {
+  let hash = 0;
+  const text = String(input || '');
+  for (let i = 0; i < text.length; i++) {
+    hash = Math.imul(31, hash) + text.charCodeAt(i) | 0;
+  }
+  return Math.abs(hash);
+}
+
+function _tierLabel(tier) {
+  const labels = {
+    1: 'infantry & small arms',
+    2: 'armor & naval',
+    3: 'missiles & aviation',
+    4: 'electronics & advanced jets',
+    5: 'stealth, cyber & space',
+  };
+  return labels[tier] || 'defense';
+}
+
+function _defenseResourceScore(nation) {
+  const data = nation?.resourceData || {};
+  const minerals = Number(data.minerals?.level || 0);
+  const rareEarth = Number(data.rareEarth?.level || 0);
+  const oil = Number(data.oil?.level || 0);
+  const gas = Number(data.gas?.level || 0);
+  const coal = Number(data.coal?.level || 0);
+  const base = Number(nation?.resources || 0);
+  return clamp(
+    base * 0.18 + minerals * 0.26 + rareEarth * 0.34 + oil * 0.12 + gas * 0.06 + coal * 0.04,
+    8,
+    160
+  );
+}
+
+function _defenseTierResourceGate(nation, tier) {
+  const resourceScore = _defenseResourceScore(nation);
+  const techLevel = Number(nation?.techLevel || 1);
+  const gates = {
+    1: 14,
+    2: 24,
+    3: 36,
+    4: 52,
+    5: 68,
+  };
+  const required = gates[tier] || 24;
+  return resourceScore >= required && techLevel >= Math.max(1, tier * 0.85);
+}
+
+function _defenseNationScore(nation) {
+  const education = Number(nation?.education || 0);
+  const governance = Number(nation?.governance || 0);
+  const techLevel = Number(nation?.techLevel || 0);
+  const innovationRisk = Number(nation?.innovationRisk ?? 45);
+  const riskDiscipline = 100 - innovationRisk;
+  const rawInnovation = ((education * 0.45) + (governance * 0.20) + (techLevel * 12) + (riskDiscipline * 0.15)) / 100;
+  const militaryBudgetShare = clamp(((nation?.aiBudget?.military ?? 20) / 35), 0.5, 1.6);
+  const resourceFactor = clamp((_defenseResourceScore(nation) / 62), 0.45, 1.9);
+  return clamp(rawInnovation * militaryBudgetShare * resourceFactor, 0.08, 2.5);
+}
+
+function _defenseMaxFoundingTier(nation) {
+  const score = _defenseNationScore(nation);
+  const education = Number(nation?.education || 0);
+  let maxTier = 0;
+
+  DEFENSE_FOUNDING_THRESHOLDS.forEach(threshold => {
+    if (education >= threshold.education && score >= threshold.score) {
+      maxTier = threshold.tier;
+    }
+  });
+
+  return maxTier;
+}
+
+function processDefenseCompanyFoundings() {
+  const unfounded = DEFENSE_COMPANIES.filter(company => company.foundedBy === null);
+  if (unfounded.length === 0 || !NATIONS) return;
+
+  const COOLDOWN_TURNS = 30;
+  const MAX_PER_NATION = 3;
+  const MAX_GLOBAL_PER_TURN = 2;
+  let globalFoundedThisTurn = 0;
+
+  const nationIds = Object.keys(NATIONS).sort((a, b) => {
+    const aHash = _dcHash(`${a}-${GAME?.turn || 0}`) % 10000;
+    const bHash = _dcHash(`${b}-${GAME?.turn || 0}`) % 10000;
+    return aHash - bHash;
+  });
+
+  for (const nationId of nationIds) {
+    if (globalFoundedThisTurn >= MAX_GLOBAL_PER_TURN) break;
+
+    const nation = NATIONS[nationId];
+    if (!nation || nation.failedState) continue;
+
+    if (nation.lastDefCompanyFoundedTurn != null && ((GAME?.turn || 0) - nation.lastDefCompanyFoundedTurn) < COOLDOWN_TURNS) {
+      continue;
+    }
+
+    const ownedCount = DEFENSE_COMPANIES.filter(company => company.foundedBy === nationId).length;
+    if (ownedCount >= MAX_PER_NATION) continue;
+
+    const maxTier = _defenseMaxFoundingTier(nation);
+    if (maxTier <= 0) continue;
+
+    const eligible = unfounded.filter(company => {
+      const tier = company.foundingTier || 3;
+      return tier <= maxTier && _defenseTierResourceGate(nation, tier);
+    });
+    if (eligible.length === 0) continue;
+
+    const score = _defenseNationScore(nation);
+    const threshold = DEFENSE_FOUNDING_THRESHOLDS.find(entry => entry.tier === maxTier);
+    const excess = threshold ? Math.max(0, score - threshold.score) : 0;
+    const probability = clamp(excess * 0.08 + 0.01, 0.005, 0.12);
+    if (Math.random() > probability) continue;
+
+    const lowestTier = Math.min(...eligible.map(company => company.foundingTier || 3));
+    const sameTierCandidates = eligible.filter(company => (company.foundingTier || 3) === lowestTier);
+    const pickIndex = _dcHash(`${nationId}-${GAME?.turn || 0}-defense-company`) % sameTierCandidates.length;
+    const pick = sameTierCandidates[pickIndex];
+    if (!pick) continue;
+
+    pick.foundedBy = nationId;
+    pick.foundedTurn = GAME?.turn || 0;
+    pick.tier = 1;
+    pick.techLevel = clamp(Number(nation.techLevel || 1) * 0.8, 1.0, 10.0);
+    pick.researchProgress = 0;
+    pick.researchFocus = null;
+    pick.equipment = [];
+    pick.supplierRelations = [];
+
+    const eraLabel = getEraForTechLevel(pick.techLevel).label;
+    const eraKey = eraLabel === 'WW1 Era' ? 'ERA1' :
+      eraLabel === 'Interwar' ? 'ERA2' :
+      eraLabel === 'WW2 Era' ? 'ERA3' :
+      eraLabel === 'Early Cold War' ? 'ERA4' :
+      eraLabel === 'Late Cold War' ? 'ERA5' :
+      eraLabel === 'Modern' ? 'ERA6' :
+      eraLabel === 'Near Future' ? 'ERA7' : 'ERA8';
+    const eraTemplates = EQUIPMENT_TEMPLATES[eraKey] || EQUIPMENT_TEMPLATES.ERA1;
+    const resourceScore = _defenseResourceScore(nation);
+    const starterCategories = resourceScore >= 70
+      ? ['tank', 'fighter', 'missile', 'artillery', 'drone', 'rifle']
+      : resourceScore >= 40
+        ? ['tank', 'artillery', 'drone', 'rifle', 'ifv']
+        : ['rifle', 'artillery', 'ifv', 'drone'];
+
+    starterCategories.forEach((cat) => {
+      const options = (eraTemplates?.[cat] || []).filter(item => Number(item.techReq || 1) <= pick.techLevel + 0.65);
+      if (!options.length) return;
+      const selected = options[Math.floor(Math.random() * Math.min(options.length, 2))];
+      if (!selected) return;
+      pick.equipment.push({
+        ...selected,
+        produced: 0,
+        id: `${pick.id}_${selected.name.replace(/\s+/g, '_')}`,
+        tierUnlockedAt: pick.tier,
+      });
+    });
+
+    if (!pick.equipment.length) {
+      const fallback = (eraTemplates?.rifle || [])[0] || (EQUIPMENT_TEMPLATES.ERA1.rifle || [])[0];
+      if (fallback) {
+        pick.equipment.push({
+          ...fallback,
+          produced: 0,
+          id: `${pick.id}_${fallback.name.replace(/\s+/g, '_')}`,
+          tierUnlockedAt: pick.tier,
+        });
+      }
+    }
+
+    pick.researchFocus = pick.equipment[0]?.cat || 'rifle';
+    nation.lastDefCompanyFoundedTurn = GAME?.turn || 0;
+
+    if (typeof initDefenseCompanyFinancials === 'function') {
+      initDefenseCompanyFinancials(pick);
+    }
+    if (typeof initDefenseCompanyOrderState === 'function') {
+      initDefenseCompanyOrderState(pick);
+    }
+
+    const year = GAME?.date instanceof Date ? GAME.date.getFullYear() : '?';
+    if (typeof addNews === 'function') {
+      addNews(`🏭 ${nation.flag || ''} ${nation.name} establishes ${pick.name} — ${_tierLabel(lowestTier)} contractor (${year})`, 'military');
+    }
+
+    globalFoundedThisTurn++;
+    const unfoundedIndex = unfounded.indexOf(pick);
+    if (unfoundedIndex !== -1) unfounded.splice(unfoundedIndex, 1);
+  }
+}
+
 // ─── AI DECISIONS ─────────────────────────────────────
 
 // AI nations decide to found companies periodically
@@ -782,20 +1158,7 @@ function aiManageDefenseCompanies(nation) {
 
   const warPressure = typeof getWarPressure === 'function' ? getWarPressure(nation.id || '') : 0;
   const inHotWar = warPressure > 0.2;
-  
-  // Check owned companies count
   const owned = getNationDefenseCompanies(nation);
-  
-  // Found new company? Only if nation can afford and has few
-  const maxCompanies = Math.floor(clamp(nation.techLevel, 1, 10) * 0.5 + 1);
-  if (owned.length < maxCompanies && nation.techLevel > 2 && Math.random() < 0.1) {
-    const available = DEFENSE_COMPANIES.filter(c => c.foundedBy === null);
-    if (available.length > 0) {
-      const pick = available[Math.floor(Math.random() * available.length)];
-      const idx = DEFENSE_COMPANIES.indexOf(pick);
-      foundDefenseCompany(nation, idx);
-    }
-  }
   
   // Assign research focus for owned companies
   owned.forEach(company => {
@@ -817,23 +1180,296 @@ function aiManageDefenseCompanies(nation) {
     }
     
     // Produce equipment if needed
-    const productionChance = clamp(0.2 + warPressure * 0.22, 0.2, 0.65);
+    const productionChance = clamp(0.45 + warPressure * 0.3, 0.45, 0.95);
     if (Math.random() < productionChance && company.equipment && company.equipment.length > 0) {
-      const toProduce = company.equipment.filter(e => (e.produced || 0) < (inHotWar ? 12 : 5));
+      const demandProfile = getNationEquipmentDemand(nation);
+      const toProduce = company.equipment.filter(e => {
+        const desired = demandProfile[e.cat] || 0;
+        if (desired <= 0) return false;
+        return getCategoryInventoryTotal(nation, e.cat) < desired;
+      });
       if (toProduce.length > 0) {
         const prioritized = inHotWar
-          ? toProduce.filter(e => ['tank', 'fighter', 'artillery', 'missile', 'drone', 'rifle', 'ifv'].includes(e.cat))
+          ? toProduce.filter(e => ['tank', 'fighter', 'artillery', 'missile', 'drone', 'rifle', 'ifv', 'helicopter'].includes(e.cat))
           : toProduce;
         const sourcePool = prioritized.length > 0 ? prioritized : toProduce;
-        const pick = sourcePool[Math.floor(Math.random() * sourcePool.length)];
-        const qty = inHotWar ? (2 + Math.floor(Math.random() * 4)) : (1 + Math.floor(Math.random() * 3));
-        _produceEquipInternal(company, pick.id, qty, nation, false);
+        sourcePool.sort((a, b) => {
+          const shortageA = (demandProfile[a.cat] || 0) - getCategoryInventoryTotal(nation, a.cat);
+          const shortageB = (demandProfile[b.cat] || 0) - getCategoryInventoryTotal(nation, b.cat);
+          return shortageB - shortageA;
+        });
+        const pick = sourcePool[0];
+        const shortage = Math.max(0, (demandProfile[pick.cat] || 0) - getCategoryInventoryTotal(nation, pick.cat));
+        const qty = getEquipmentProcurementBatch(pick.cat, Math.max(shortage, Math.ceil(shortage * 0.45) + 20), true, nation);
+        if (qty > 0) _produceEquipInternal(company, pick.id, qty, nation, false);
       }
     }
   });
   
   // Set cooldown
-  nation.aiDefenseCooldown = 3 + Math.floor(Math.random() * 5);
+  nation.aiDefenseCooldown = 1 + Math.floor(Math.random() * 2);
+}
+
+const DEFENSE_GOV_PROCUREMENT_BIAS = {
+  liberal_democracy: 1.0,
+  federal_republic: 1.05,
+  constitutional_monarchy: 0.95,
+  authoritarian_state: 1.2,
+  dictatorship: 1.15,
+  military_junta: 1.35,
+  technocratic_council: 1.12,
+  socialist_republic: 1.08,
+  theocratic_state: 1.02,
+};
+
+function initDefenseCompanyOrderState(company) {
+  if (!Array.isArray(company.pendingOrders)) company.pendingOrders = [];
+  if (!Array.isArray(company.completedOrders)) company.completedOrders = [];
+  if (!company.orderLedger || typeof company.orderLedger !== 'object') company.orderLedger = {};
+  if (!company.productionByCategory || typeof company.productionByCategory !== 'object') company.productionByCategory = {};
+}
+
+function getNationDefenseBuyingStrategy(nation) {
+  initNationMilitaryForces(nation);
+  const techLevel = Number(nation?.techLevel || 1);
+  const gdp = Number(nation?.gdp || 0.2);
+  const education = Number(nation?.education || 40);
+  const readiness = Number(nation?.militaryForces?.readiness || 50);
+  const warPressure = typeof getWarPressure === 'function' ? getWarPressure(nation?.id || '') : 0;
+
+  const modernization = clamp((techLevel - 4.5) * 0.26 + (education - 45) * 0.01 + warPressure * 0.9, -0.8, 1.4);
+  const wealth = clamp(Math.log10(Math.max(gdp, 0.08)) + 0.6, 0, 2.2);
+  const qualityIndex = clamp((modernization + wealth * 0.7 + (readiness - 50) * 0.01) / 2, 0, 1);
+  const volumeMode = qualityIndex < 0.52;
+
+  return {
+    mode: volumeMode ? 'volume' : 'quality',
+    qtyMultiplier: volumeMode ? clamp(1.35 + (0.55 - qualityIndex), 1.2, 2.1) : clamp(0.55 + qualityIndex * 0.65, 0.7, 1.3),
+    techPreference: volumeMode ? 'low' : 'high',
+    qualityIndex,
+  };
+}
+
+function getNationByIdOrName(idOrName) {
+  if (!idOrName) return null;
+  return Object.values(NATIONS || {}).find(n => n && (n.id === idOrName || n.name === idOrName)) || null;
+}
+
+function getDefenseOrderCandidateCompanies(category, buyerNation) {
+  const buyerId = buyerNation?.id;
+  const list = [];
+  DEFENSE_COMPANIES.forEach(company => {
+    if (!company || !company.foundedBy) return;
+    if (!(company.equipment || []).some(eq => eq.cat === category)) return;
+    const sellerNation = getNationByIdOrName(company.foundedBy);
+    if (!sellerNation || sellerNation.failedState) return;
+    const relation = typeof getRelationBetween === 'function'
+      ? getRelationBetween(buyerId, sellerNation.id)
+      : (typeof getRelation === 'function' ? getRelation(sellerNation.id) : 0);
+    const allied = typeof isAlliedNation === 'function' ? isAlliedNation(buyerId, sellerNation.id) : false;
+    if (sellerNation.id !== buyerId && !allied && relation < -25) return;
+
+    const score = (company.tier || 1) * 0.9 + (company.techLevel || 1) * 0.8 + ((allied ? 16 : 0) + relation * 0.3);
+    list.push({ company, sellerNation, score });
+  });
+  return list.sort((a, b) => b.score - a.score);
+}
+
+function processDefenseProcurementRequests() {
+  let issuedThisTurn = 0;
+  Object.values(NATIONS).forEach(buyerNation => {
+    if (!buyerNation || buyerNation.failedState) return;
+    if (issuedThisTurn >= 20) return;
+
+    if (Number(buyerNation.defenseRequestCooldown || 0) > 0) {
+      buyerNation.defenseRequestCooldown = Math.max(0, Number(buyerNation.defenseRequestCooldown || 0) - 1);
+      return;
+    }
+
+    initNationMilitaryForces(buyerNation);
+
+    const demand = getNationEquipmentDemand(buyerNation);
+    const govBias = DEFENSE_GOV_PROCUREMENT_BIAS[buyerNation.governmentStyle] || 1;
+    const warPressure = typeof getWarPressure === 'function' ? getWarPressure(buyerNation.id || '') : 0;
+    const inHotWar = warPressure > 0.2;
+    const strategy = getNationDefenseBuyingStrategy(buyerNation);
+    buyerNation.defenseBuyingStrategy = strategy.mode;
+    const requestChance = clamp(0.16 + govBias * 0.08 + warPressure * 0.34 + (strategy.mode === 'volume' ? 0.08 : 0.03), 0.12, 0.92);
+    if (Math.random() > requestChance) return;
+
+    // Build shortage list for all categories
+    const shortages = [];
+    Object.keys(demand).forEach(category => {
+      const desired = Number(demand[category] || 0);
+      const inventory = getCategoryInventoryTotal(buyerNation, category);
+      const gap = Math.max(0, desired - inventory);
+      if (gap <= 0) return;
+      shortages.push({ category, gap });
+    });
+    if (!shortages.length) return;
+
+    shortages.sort((a, b) => b.gap - a.gap);
+
+    // Determine package size: 2-4 items based on war pressure and strategy
+    const packageSize = inHotWar
+      ? clamp(3 + Math.floor(Math.random() * 2), 2, 5)
+      : clamp(2 + Math.floor(Math.random() * 2), 1, 4);
+
+    // Select categories for the package deal
+    const preferredCats = strategy.mode === 'volume'
+      ? ['rifle', 'tank', 'artillery', 'ifv', 'drone', 'helicopter', 'patrol']
+      : ['fighter', 'missile', 'drone', 'satellite', 'submarine', 'destroyer', 'tank'];
+
+    // Pick primary category (largest gap from preferred list)
+    const primaryPick = shortages.find(entry => preferredCats.includes(entry.category)) || shortages[0];
+    const packageCategories = [primaryPick];
+
+    // Fill remaining slots with other shortages
+    for (const shortage of shortages) {
+      if (packageCategories.length >= packageSize) break;
+      if (!packageCategories.find(p => p.category === shortage.category)) {
+        packageCategories.push(shortage);
+      }
+    }
+
+    // Create orders for each category in the package
+    const packageId = `pkg_${(GAME?.turn || 0)}_${buyerNation.id}_${Math.floor(Math.random() * 9999)}`;
+    const orderDetails = [];
+
+    for (const pick of packageCategories) {
+      const candidates = getDefenseOrderCandidateCompanies(pick.category, buyerNation);
+      if (!candidates.length) continue;
+
+      const shortlisted = candidates.slice(0, Math.min(6, candidates.length));
+      const sellerPick = strategy.techPreference === 'high'
+        ? shortlisted[0]
+        : shortlisted[Math.floor(Math.random() * Math.min(3, shortlisted.length))];
+      const company = sellerPick.company;
+      initDefenseCompanyOrderState(company);
+
+      const qtyScale = getEquipmentUnitMultiplier(pick.category);
+      const desiredUnits = Math.max(1, Math.floor(pick.gap / Math.max(1, qtyScale)));
+      // Package deals: slightly smaller quantities per item since buying multiple types
+      const packageDiscount = packageCategories.length > 1 ? 0.7 : 1.0;
+      const baselineQty = Math.round(desiredUnits * (inHotWar ? 0.72 : 0.42) * strategy.qtyMultiplier * packageDiscount + (inHotWar ? 9 : 4));
+      const requestQty = clamp(
+        baselineQty,
+        2,
+        pick.category === 'rifle' ? 420 : (pick.category === 'tank' ? 2400 : (pick.category === 'missile' ? 12000 : 520))
+      );
+
+      const order = {
+        id: `ord_${(GAME?.turn || 0)}_${buyerNation.id}_${company.id}_${pick.category}_${Math.floor(Math.random() * 9999)}`,
+        packageId: packageId,
+        buyerNationId: buyerNation.id,
+        sellerNationId: sellerPick.sellerNation.id,
+        companyId: company.id,
+        category: pick.category,
+        requestedQuantity: requestQty,
+        remainingQuantity: requestQty,
+        createdTurn: GAME?.turn || 0,
+        priority: inHotWar ? 'urgent' : 'standard',
+        status: 'queued',
+      };
+
+      company.pendingOrders.push(order);
+      orderDetails.push({ category: pick.category, qty: requestQty, company: company.name });
+      issuedThisTurn++;
+    }
+
+    if (orderDetails.length > 0) {
+      buyerNation.defenseRequestCooldown = inHotWar ? (1 + Math.floor(Math.random() * 2)) : (2 + Math.floor(Math.random() * 4));
+
+      // News for package deals
+      if (Math.random() < 0.35 || inHotWar) {
+        const summary = orderDetails.map(o => `${formatEquipmentDisplayQuantity(o.category, o.qty)} ${o.category}`).join(', ');
+        const primaryCompany = orderDetails[0].company;
+        addNews(`📨 ${buyerNation.flag || '🏳️'} ${buyerNation.name} requested package deal: ${summary} from ${primaryCompany}.`, inHotWar ? 'major' : 'minor');
+      }
+    }
+  });
+}
+
+function fulfillDefenseCompanyOrders(company, sellerNation) {
+  initDefenseCompanyOrderState(company);
+  if (!company.pendingOrders.length) return;
+
+  const remainingOrders = [];
+  const processedThisTurn = 4 + Math.floor((company.tier || 1) / 2);
+  let processed = 0;
+
+  company.pendingOrders.forEach(order => {
+    if (processed >= processedThisTurn) {
+      remainingOrders.push(order);
+      return;
+    }
+
+    const buyerNation = NATIONS[order.buyerNationId];
+    if (!buyerNation || buyerNation.failedState) return;
+
+    const candidateEq = (company.equipment || [])
+      .filter(eq => eq.cat === order.category)
+      .sort((a, b) => Number(b.techReq || 0) - Number(a.techReq || 0))[0];
+    if (!candidateEq) {
+      remainingOrders.push(order);
+      return;
+    }
+
+    const warPressure = typeof getWarPressure === 'function' ? getWarPressure(buyerNation.id || '') : 0;
+    const inHotWar = warPressure > 0.2;
+    const buyerStrategy = getNationDefenseBuyingStrategy(buyerNation);
+    const batch = clamp(
+      Math.ceil(order.remainingQuantity * (inHotWar ? 0.78 : 0.5) * buyerStrategy.qtyMultiplier),
+      1,
+      getEquipmentProcurementBatch(order.category, order.remainingQuantity * getEquipmentUnitMultiplier(order.category), inHotWar, buyerNation)
+    );
+
+    const producedQty = _produceEquipInternal(company, candidateEq.id, batch, sellerNation, false);
+    if (!producedQty || producedQty <= 0) {
+      remainingOrders.push(order);
+      return;
+    }
+
+    const reserved = reserveEquipmentForExport(sellerNation, candidateEq.name, order.category, producedQty);
+    if (!reserved || reserved.quantity <= 0) {
+      remainingOrders.push(order);
+      return;
+    }
+
+    addEquipmentToStockpile(buyerNation, order.category, candidateEq.name, reserved.quantity, reserved.condition || 100);
+
+    const template = findEquipmentTemplate(candidateEq.name, order.category);
+    const unitPrice = Math.max(1, Math.round(getDefenseMarketPrice(template, reserved.condition || 100) * 0.95));
+    const totalPrice = unitPrice * reserved.quantity;
+    processArmsPayment(sellerNation, buyerNation, totalPrice, {
+      sourceCompanyId: company.id,
+      quantity: reserved.quantity,
+      itemName: candidateEq.name,
+      category: order.category,
+    });
+
+    company.productionByCategory[order.category] = Number(company.productionByCategory[order.category] || 0) + reserved.quantity;
+    const buyerKey = buyerNation.id || buyerNation.name;
+    if (!company.orderLedger[buyerKey]) company.orderLedger[buyerKey] = { nationName: buyerNation.name || buyerKey, units: 0, byCategory: {} };
+    company.orderLedger[buyerKey].units += reserved.quantity;
+    company.orderLedger[buyerKey].byCategory[order.category] = Number(company.orderLedger[buyerKey].byCategory[order.category] || 0) + reserved.quantity;
+
+    order.remainingQuantity = Math.max(0, Number(order.remainingQuantity || 0) - reserved.quantity);
+    processed++;
+
+    if (order.remainingQuantity <= 0) {
+      order.status = 'fulfilled';
+      order.fulfilledTurn = GAME?.turn || 0;
+      company.completedOrders.push(order);
+      if (company.completedOrders.length > 40) company.completedOrders.shift();
+      addNews(`🤝 ${company.name} fulfilled ${formatEquipmentDisplayQuantity(order.category, order.requestedQuantity)} contract for ${buyerNation.name}.`, 'minor');
+    } else {
+      order.status = 'partial';
+      remainingOrders.push(order);
+    }
+  });
+
+  company.pendingOrders = remainingOrders;
 }
 
 // ─── COMPANY ECONOMIC EFFECTS ─────────────────────────
@@ -870,8 +1506,27 @@ function applyDefenseEconomicEffects(nation) {
 
 // ─── SELL EQUIPMENT BETWEEN NATIONS ───────────────────
 
+// Check if a nation can sell specific equipment (only lower-tier items can be sold)
+function canSellEquipment(nation, equipmentItem) {
+  const companies = getNationDefenseCompanies(nation);
+  if (companies.length === 0) return true; // If no companies, can sell anything
+  
+  // Find highest tier any company has reached
+  const maxTier = Math.max(...companies.map(c => c.tier || 1));
+
+  // Nations at tech 5 and below can freely export inventory to stabilize early/mid game arms flow.
+  if ((Number(nation?.techLevel || 1) <= 5) || maxTier <= 5) return true;
+  
+  // Equipment can only be sold if it's from a lower tier
+  const equipTier = equipmentItem.companyTier || equipmentItem.tier || 0;
+  return equipTier < maxTier;
+}
+
 function sellEquipmentBetweenNations(sellerNation, buyerNation, equipmentItem, quantity) {
   if (!sellerNation.militaryStockpile || !buyerNation) return false;
+  
+  // Check if seller can sell this equipment (only lower-tier items)
+  if (!canSellEquipment(sellerNation, equipmentItem)) return false;
   
   const cat = equipmentItem.cat || equipmentItem.category;
   if (!sellerNation.militaryStockpile[cat]) return false;
@@ -886,7 +1541,7 @@ function sellEquipmentBetweenNations(sellerNation, buyerNation, equipmentItem, q
   
   // Calculate price
   const template = findEquipmentTemplate(equipmentItem.name, cat);
-  const price = template ? template.cost * quantity * 1.5 : quantity * 5;
+  const price = template ? getEquipmentUnitCost(template, cat) * quantity * 1.5 : quantity * 5;
   
   // Check buyer can afford
   if (buyerNation.gdp * 1000 < price) return false;
@@ -963,8 +1618,16 @@ function computeNationMilitaryStrength(nation) {
 // ─── PROCESS ALL DEFENSE COMPANIES (main loop hook) ──
 
 function processAllDefenseCompanies() {
+  processDefenseProcurementRequests();
+
   Object.values(NATIONS).forEach(nation => {
     if (nation.failedState) return;
+    const companies = getNationDefenseCompanies(nation);
+
+    companies.forEach(company => {
+      initDefenseCompanyOrderState(company);
+      fulfillDefenseCompanyOrders(company, nation);
+    });
     
     // AI management
     aiManageDefenseCompanies(nation);
@@ -973,7 +1636,6 @@ function processAllDefenseCompanies() {
     applyDefenseEconomicEffects(nation);
     
     // Update company tech levels to match nation
-    const companies = getNationDefenseCompanies(nation);
     companies.forEach(company => {
       if (nation.techLevel > company.techLevel) {
         company.techLevel += clamp((nation.techLevel - company.techLevel) * 0.1, 0, 0.5);
@@ -1060,12 +1722,16 @@ function renderMilitaryIndustrialTab() {
         html += '<div class="company-equipment"><h6>Developed Equipment:</h6>';
         company.equipment.forEach(eq => {
           const produced = eq.produced || 0;
+          const singleQty = eq.cat === 'rifle' ? 10 : 1;
+          const bulkQty = eq.cat === 'rifle' ? 50 : 5;
+          const singleLabel = eq.cat === 'rifle' ? '+10K' : '+1';
+          const bulkLabel = eq.cat === 'rifle' ? '+50K' : '+5';
           html += `<div class="equip-row">
             <span>${eq.name}</span>
             <span class="equip-type">${eq.cat}</span>
-            <span class="equip-produced">Produced: ${produced}</span>
-            <button class="btn-small" onclick="produceEquipment('${company.id}', '${eq.id}', 1)">+1</button>
-            <button class="btn-small" onclick="produceEquipment('${company.id}', '${eq.id}', 5)">+5</button>
+            <span class="equip-produced">Produced: ${formatEquipmentDisplayQuantity(eq.cat, produced)}</span>
+            <button class="btn-small" onclick="produceEquipment('${company.id}', '${eq.id}', ${singleQty})">${singleLabel}</button>
+            <button class="btn-small" onclick="produceEquipment('${company.id}', '${eq.id}', ${bulkQty})">${bulkLabel}</button>
           </div>`;
         });
         html += '</div>';
@@ -1229,7 +1895,7 @@ function openForeignNationIntel(nationId) {
         html += '<div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px">';
         company.equipment.forEach(function(eq) {
           const produced = eq.produced || 0;
-          html += '<span style="background:rgba(46,167,255,0.12);border:1px solid var(--border-color);border-radius:4px;padding:1px 6px;font-size:10px;color:var(--text-secondary)">' + eq.name + ' (' + produced + ')</span>';
+          html += '<span style="background:rgba(46,167,255,0.12);border:1px solid var(--border-color);border-radius:4px;padding:1px 6px;font-size:10px;color:var(--text-secondary)">' + eq.name + ' (' + formatEquipmentDisplayQuantity(eq.cat, produced) + ')</span>';
         });
         html += '</div>';
       }
@@ -1323,8 +1989,8 @@ window.openForeignNationIntel = openForeignNationIntel;
 function initNationMilitaryForces(nation) {
   if (!nation.militaryForces) {
     nation.militaryForces = {
-      activePersonnel: 0,       // in thousands
-      reservePersonnel: 0,      // in thousands
+      activePersonnel: 0,       // in millions
+      reservePersonnel: 0,      // in millions
       // Combat equipment counts
       fighters: { total: 0, active: 0, reserve: 0, mothballed: 0 },
       bombers: { total: 0, active: 0, reserve: 0, mothballed: 0 },
@@ -1345,6 +2011,8 @@ function initNationMilitaryForces(nation) {
       readiness: 100,          // 0-100
       maintenanceCost: 0,      // Monthly $M
       totalPower: 0,
+      trainingQuality: 50,
+      manpowerPressure: 0,
       equipmentAge: 0,
     };
   }
@@ -1362,59 +2030,45 @@ function initNationMilitaryForces(nation) {
   });
 }
 
-// ─── COMPUTE MANPOWER & MILITARY PRODUCTION ──────────
-
-function computeNationMilitaryProduction(nation) {
-  initNationMilitaryForces(nation);
-  
-  const pop = nation.population; // in millions
-  const gdp = nation.gdp; // in trillions
-  const tech = nation.techLevel;
-  const gov = getGovernmentProfile(nation.governmentStyle);
-  
-  // Budget allocation for military (as decimal 0-1)
-  const budget = nation.aiBudget || doctrineBaseBudget('balanced');
-  const milPct = clamp(budget.military / 100, 0.02, 0.70);
-  
-  // --- MANPOWER ---
-  // Max military population based on government type and population
-  // Dictatorships can have larger armies relative to population
-  const popMobilizationRate = clamp(gov.stabilityBoost || 1.0, 0.5, 2.0);
-  // Base: 0.5% to 4% of population can serve
-  const maxMilitaryPop = clamp(pop * clamp(0.005 + tech * 0.003, 0.005, 0.04) * popMobilizationRate, 0.05, 60);
-  // Active duty: portion of max, influenced by budget and war pressure
-  const warPressure = getWarPressure(nation.id || '');
-  const activeRatio = clamp(milPct * 1.2 + warPressure * 0.3 + (nation.inCrisis ? 0.1 : 0), 0.1, 1.0);
-  const targetActive = clamp(maxMilitaryPop * activeRatio, 0.05, maxMilitaryPop);
-  // Reserve: 2-3x active depending on doctrine
-  const reserveRatio = clamp(gov.stabilityBoost > 1.2 ? 3.0 : 2.0, 1.5, 4.0);
-  const targetReserve = clamp(targetActive * reserveRatio, 0.1, maxMilitaryPop * 3);
-  
-  // Smoothly move toward targets
-  nation.militaryForces.activePersonnel += (targetActive - nation.militaryForces.activePersonnel) * 0.05;
-  nation.militaryForces.reservePersonnel += (targetReserve - nation.militaryForces.reservePersonnel) * 0.03;
-  
-  // Clamp
-  nation.militaryForces.activePersonnel = clamp(nation.militaryForces.activePersonnel, 0.01, maxMilitaryPop);
-  nation.militaryForces.reservePersonnel = clamp(nation.militaryForces.reservePersonnel, 0, maxMilitaryPop * 3);
-  
-  return {
-    maxMilitaryPop,
-    activeRatio,
-    targetActive,
-    targetReserve,
-    warPressure
-  };
+function getNationMilitaryBudgetProfile(nation) {
+  const isPlayerNation = !!(nation && typeof GAME !== 'undefined' && nation.id === GAME.playerNation?.id);
+  const budget = isPlayerNation && GAME?.budget
+    ? GAME.budget
+    : (nation.aiBudget || doctrineBaseBudget('balanced'));
+  const milPct = clamp((Number(budget.military) || 0) / 100, 0.02, 0.70);
+  return { budget, milPct, isPlayerNation };
 }
 
-// ─── PRODUCE EQUIPMENT FROM STOCKPILE TO FORCES ──────
+function getPersonnelCountFromMillions(value) {
+  return Math.max(0, Math.round((Number(value) || 0) * 1000000));
+}
 
-function deployEquipmentToForces(nation) {
-  initNationMilitaryForces(nation);
-  const forces = nation.militaryForces;
-  const stockpile = nation.militaryStockpile || {};
-  
-  // Map categories to forces fields
+function getEquipmentUnitMultiplier(category) {
+  return category === 'rifle' ? 1000 : 1;
+}
+
+function getDisplayQuantity(category, quantity) {
+  return Math.max(0, Number(quantity) || 0) * getEquipmentUnitMultiplier(category);
+}
+
+function formatMilitaryQuantity(value) {
+  const qty = Math.max(0, Number(value) || 0);
+  if (typeof formatHumanNumber === 'function') return formatHumanNumber(qty, qty >= 1000 ? 1 : 0);
+  return Math.round(qty).toLocaleString();
+}
+
+function formatEquipmentDisplayQuantity(category, quantity) {
+  return formatMilitaryQuantity(getDisplayQuantity(category, quantity));
+}
+
+function getEquipmentUnitCost(template, category) {
+  if (!template) return 5;
+  const baseCost = Number(template.cost) || 5;
+  const procurementDiscount = category === 'rifle' ? 0.22 : 0.16;
+  return Math.max(1, baseCost * procurementDiscount);
+}
+
+function getEquipmentForceField(category) {
   const catMap = {
     fighter: 'fighters',
     bomber: 'bombers',
@@ -1432,9 +2086,171 @@ function deployEquipmentToForces(nation) {
     satellite: 'satellites',
     rifle: 'rifles'
   };
+  return catMap[category] || null;
+}
+
+function getCategoryInventoryTotal(nation, category) {
+  initNationMilitaryForces(nation);
+
+  const stockTotal = (nation.militaryStockpile?.[category] || []).reduce((sum, item) => sum + getDisplayQuantity(category, item.quantity || 0), 0);
+  const forceField = getEquipmentForceField(category);
+  if (!forceField || !nation.militaryForces[forceField]) return stockTotal;
+
+  return stockTotal + getDisplayQuantity(category, nation.militaryForces[forceField].total || 0);
+}
+
+function getNationEquipmentDemand(nation) {
+  initNationMilitaryForces(nation);
+  const forces = nation.militaryForces;
+  const { milPct } = getNationMilitaryBudgetProfile(nation);
+  const activeTroops = getPersonnelCountFromMillions(forces.activePersonnel);
+  const reserveTroops = getPersonnelCountFromMillions(forces.reservePersonnel);
+  const troopBase = activeTroops + reserveTroops * 0.35;
+  const techFactor = clamp((Number(nation.techLevel) || 5) / 5, 0.6, 2.2);
+  const spendFactor = clamp(milPct / 0.12, 0.5, 3.0);
+  const wealthFactor = clamp(Math.sqrt(Math.max(Number(nation.gdp) || 0.2, 0.2)), 0.5, 4.5);
+  const navalFactor = clamp((Number(nation.gdp) || 0.2) * 0.6 * techFactor * spendFactor, 0.2, 12);
+
+  return {
+    rifle: Math.max(8000, Math.round((activeTroops + reserveTroops * 0.2) * 1.2)),
+    tank: Math.max(20, Math.round((troopBase / 850) * spendFactor * wealthFactor)),
+    ifv: Math.max(40, Math.round((troopBase / 260) * spendFactor * wealthFactor)),
+    artillery: Math.max(24, Math.round((troopBase / 650) * spendFactor * wealthFactor)),
+    fighter: Math.max(12, Math.round((troopBase / 38000) * techFactor * spendFactor * wealthFactor)),
+    bomber: Math.max(4, Math.round((troopBase / 140000) * techFactor * spendFactor * wealthFactor)),
+    helicopter: Math.max(12, Math.round((troopBase / 22000) * techFactor * spendFactor * wealthFactor)),
+    transport: Math.max(8, Math.round((troopBase / 65000) * techFactor * wealthFactor)),
+    missile: Math.max(30, Math.round((troopBase / 320) * techFactor * spendFactor * wealthFactor)),
+    drone: Math.max(30, Math.round((troopBase / 900) * techFactor * spendFactor * wealthFactor)),
+    destroyer: Math.max(0, Math.round(navalFactor * 2.5)),
+    submarine: Math.max(0, Math.round(navalFactor * 1.4)),
+    carrier: Math.max(0, Math.round(Math.max((Number(nation.gdp) || 0) - 4, 0) * 0.7 * techFactor)),
+    patrol: Math.max(6, Math.round(navalFactor * 5)),
+    satellite: Math.max(0, Math.round(Math.max((Number(nation.techLevel) || 0) - 5, 0) * 6 * spendFactor)),
+  };
+}
+
+function getEquipmentProcurementBatch(category, shortage, inHotWar, nation) {
+  const { milPct } = getNationMilitaryBudgetProfile(nation);
+  const gap = Math.max(0, Math.floor(shortage || 0));
+  if (gap <= 0) return 0;
+
+  const pressure = clamp((inHotWar ? 0.34 : 0.18) + milPct * 0.32, 0.18, 0.9);
+  const qty = Math.round(gap * pressure);
+
+  switch (category) {
+    case 'rifle': return clamp(Math.round(qty / 1000), 2, inHotWar ? 140 : 70);
+    case 'missile': return clamp(qty, 180, inHotWar ? 12000 : 5000);
+    case 'drone': return clamp(qty, 140, inHotWar ? 9500 : 4500);
+    case 'artillery': return clamp(qty, 45, inHotWar ? 2800 : 1200);
+    case 'ifv': return clamp(qty, 35, inHotWar ? 2200 : 900);
+    case 'tank': return clamp(qty, 20, inHotWar ? 1600 : 650);
+    case 'fighter':
+    case 'bomber':
+    case 'helicopter':
+    case 'transport': return clamp(qty, 4, inHotWar ? 240 : 110);
+    case 'destroyer':
+    case 'submarine':
+    case 'carrier': return clamp(qty, 1, inHotWar ? 16 : 8);
+    case 'patrol': return clamp(qty, 6, inHotWar ? 90 : 40);
+    case 'satellite': return clamp(qty, 1, 20);
+    default: return clamp(qty, 2, inHotWar ? 120 : 45);
+  }
+}
+
+// ─── COMPUTE MANPOWER & MILITARY PRODUCTION ──────────
+
+function computeNationMilitaryProduction(nation) {
+  initNationMilitaryForces(nation);
+  if (typeof initNationDemographics === 'function') initNationDemographics(nation);
+  
+  const pop = nation.population; // in millions
+  const tech = nation.techLevel;
+  const gov = getGovernmentProfile(nation.governmentStyle);
+  const { milPct } = getNationMilitaryBudgetProfile(nation);
+  const demographics = nation.demographics || {};
+  
+  // --- MANPOWER ---
+  const workingAgePool = pop * clamp((Number(demographics.workingAgePct) || 60) / 100, 0.35, 0.8);
+  const recruitablePool = clamp(
+    Number(demographics.recruitablePoolM) || workingAgePool * 0.12,
+    0.03,
+    Math.max(0.03, workingAgePool * 0.45)
+  );
+  const supportPool = clamp(
+    Number(demographics.supportPersonnelPoolM) || workingAgePool * 0.06,
+    0.02,
+    Math.max(0.02, workingAgePool * 0.2)
+  );
+  const warPressure = getWarPressure(nation.id || '');
+  const mobilizationRate = clamp(gov.stabilityBoost || 1.0, 0.6, 1.45);
+  const maxMilitaryPop = clamp(recruitablePool * mobilizationRate, 0.05, Math.max(0.05, recruitablePool));
+  const activeRatio = clamp(0.08 + milPct * 0.22 + warPressure * 0.16 + (nation.inCrisis ? 0.03 : 0), 0.05, 0.42);
+  const targetActive = clamp(maxMilitaryPop * activeRatio, 0.03, maxMilitaryPop);
+  const reserveBase = Math.max(0, recruitablePool - targetActive);
+  const reserveRatio = clamp(gov.stabilityBoost > 1.2 ? 0.92 : 0.72, 0.5, 1.0);
+  const targetReserve = clamp(reserveBase * reserveRatio + supportPool * 0.25, 0.03, recruitablePool * 1.35);
+  const skilledLabor = nation.eduState ? Number(nation.eduState.skilledLaborPct || 0) : Number(nation.education || 50);
+  const highSkill = nation.eduState ? Number(nation.eduState.highSkillPct || 0) : Math.max(0, Number(nation.education || 50) * 0.18);
+  const trainingQuality = clamp(
+    32 + skilledLabor * 0.30 + highSkill * 0.40 + (nation.health || 50) * 0.14 + (nation.governance || 50) * 0.12 + milPct * 22 - warPressure * 4,
+    20,
+    100
+  );
+  
+  // Smoothly move toward targets
+  nation.militaryForces.activePersonnel += (targetActive - nation.militaryForces.activePersonnel) * 0.05;
+  nation.militaryForces.reservePersonnel += (targetReserve - nation.militaryForces.reservePersonnel) * 0.03;
+  
+  // Clamp
+  nation.militaryForces.activePersonnel = clamp(nation.militaryForces.activePersonnel, 0.01, maxMilitaryPop);
+  nation.militaryForces.reservePersonnel = clamp(nation.militaryForces.reservePersonnel, 0, recruitablePool * 1.35);
+  nation.militaryForces.trainingQuality = trainingQuality;
+  nation.militaryForces.manpowerPressure = clamp(
+    ((nation.militaryForces.activePersonnel + nation.militaryForces.reservePersonnel) / Math.max(recruitablePool, 0.01)) * 100,
+    0,
+    100
+  );
+  
+  return {
+    maxMilitaryPop,
+    recruitablePool,
+    supportPool,
+    activeRatio,
+    targetActive,
+    targetReserve,
+    trainingQuality,
+    warPressure
+  };
+}
+
+// ─── PRODUCE EQUIPMENT FROM STOCKPILE TO FORCES ──────
+
+function deployEquipmentToForces(nation) {
+  initNationMilitaryForces(nation);
+  const forces = nation.militaryForces;
+  const stockpile = nation.militaryStockpile || {};
+  
+  const deployRateByCategory = {
+    rifle: 0.65,
+    missile: 0.55,
+    drone: 0.55,
+    ifv: 0.45,
+    artillery: 0.45,
+    tank: 0.40,
+    fighter: 0.35,
+    bomber: 0.35,
+    helicopter: 0.35,
+    transport: 0.30,
+    destroyer: 0.22,
+    submarine: 0.22,
+    carrier: 0.18,
+    patrol: 0.32,
+    satellite: 0.20,
+  };
   
   Object.keys(stockpile).forEach(cat => {
-    const targetField = catMap[cat];
+    const targetField = getEquipmentForceField(cat);
     if (!targetField || !forces[targetField]) return;
     
     const items = stockpile[cat] || [];
@@ -1442,8 +2258,8 @@ function deployEquipmentToForces(nation) {
       const qty = item.quantity || 0;
       if (qty <= 0) return;
       
-      // Deploy to active forces (up to 80% of stockpile)
-      const toDeploy = Math.floor(qty * 0.3); // 30% of stock per cycle
+      const deployRate = deployRateByCategory[cat] || 0.30;
+      const toDeploy = Math.floor(qty * deployRate);
       if (toDeploy > 0) {
         forces[targetField].total += toDeploy;
         forces[targetField].active += toDeploy;
@@ -1480,12 +2296,8 @@ function computeMaintenanceCosts(nation) {
   const forces = nation.militaryForces;
   let totalCost = 0;
   
-  // Personnel costs (~$50K per active soldier per year = ~$4.2K/month)
-  const personnelCost = forces.activePersonnel * 0.0042; // $M per month (for thousands)
-  totalCost += personnelCost;
-  
-  // Reserve personnel cost (20% of active)
-  totalCost += forces.reservePersonnel * 0.00084;
+  // Personnel salary pressure is intentionally minimized so budgets prioritize equipment and procurement.
+  totalCost += forces.reservePersonnel * 42;
   
   // Equipment maintenance costs per unit per month
   const maintRates = {
@@ -1519,12 +2331,12 @@ function applyMaintenanceAndReadiness(nation, isPlayer) {
   
   // Estimate nation's military budget in $M
   const gdpMonthly = (nation.gdp * 1000) / 12; // GDP in $B/month * 1000 = $M
-  const budget = nation.aiBudget || doctrineBaseBudget('balanced');
-  const milPct = clamp(budget.military / 100, 0.02, 0.70);
-  const availableBudget = gdpMonthly * milPct * 0.15; // ~15% of mil budget for O&M
+  const { milPct } = getNationMilitaryBudgetProfile(nation);
+  const availableBudget = gdpMonthly * milPct * 0.38;
   
   // Check if they can afford maintenance
   const fundingRatio = clamp(availableBudget / Math.max(cost, 0.01), 0, 2.5);
+  forces.lastFundingRatio = fundingRatio;
   
   // Update readiness
   if (fundingRatio >= 1.0) {
@@ -1609,7 +2421,9 @@ function computeNationMilitaryPower(nation) {
   // Modifiers
   power *= clamp(nation.techLevel / 5, 0.5, 2.0);
   power *= clamp(forces.readiness / 50, 0.5, 1.5);
+  power *= clamp((forces.trainingQuality || 50) / 50, 0.65, 1.65);
   power *= clamp(nation.governance / 50, 0.5, 1.5);
+  power *= clamp(1 - Math.max(0, (forces.manpowerPressure || 0) - 85) * 0.004, 0.75, 1.0);
   
   // Normalize to 0-100 scale (logarithmic)
   const normalizedPower = clamp(Math.log10(power + 1) * 20, 1, 100);
@@ -1648,8 +2462,8 @@ function processAllNationMilitaryForces() {
 
 // ─── TECH UPGRADE / SELL OLD EQUIPMENT ──────────────
 
-// When a nation discovers a new tech that unlocks better equipment,
-// they can sell their old equipment to allies or neutral nations
+// When a nation discovers new tech that unlocks better equipment,
+// they can sell their old (lower-tier) equipment to allies or neutral nations
 
 function processTechUpgradeSales(nation) {
   initNationMilitaryForces(nation);
@@ -1665,24 +2479,15 @@ function processTechUpgradeSales(nation) {
   
   if (recentDiscoveries.length === 0) return;
   
-  // Find old equipment in stockpile (low power items)
+  // Find old equipment in stockpile (only lower-tier items)
   let oldEquipmentForSale = [];
   Object.keys(stockpile).forEach(cat => {
     (stockpile[cat] || []).forEach(item => {
-      const template = findEquipmentTemplate(item.name, cat);
-      if (template) {
-        // Check if this is low-tech (old generation)
-        const eraNum = parseInt(template.era.replace('ERA', ''));
-        const nationEraNum = parseInt(getEraForTechLevel(nation.techLevel).label === 'WW1 Era' ? '1' :
-          getEraForTechLevel(nation.techLevel).label === 'Interwar' ? '2' :
-          getEraForTechLevel(nation.techLevel).label === 'WW2 Era' ? '3' :
-          getEraForTechLevel(nation.techLevel).label === 'Early Cold War' ? '4' :
-          getEraForTechLevel(nation.techLevel).label === 'Late Cold War' ? '5' :
-          getEraForTechLevel(nation.techLevel).label === 'Modern' ? '6' :
-          getEraForTechLevel(nation.techLevel).label === 'Near Future' ? '7' : '8');
-        
-        if (eraNum < nationEraNum - 1 && (item.quantity || 0) > 0) {
-          oldEquipmentForSale.push({ item, cat, eraDiff: nationEraNum - eraNum });
+      // Only sell equipment from lower tiers (not current max tier)
+      if (canSellEquipment(nation, item)) {
+        const template = findEquipmentTemplate(item.name, cat);
+        if (template) {
+          oldEquipmentForSale.push({ item, cat });
         }
       }
     });
@@ -1723,7 +2528,7 @@ function processTechUpgradeSales(nation) {
     
     // Price: heavily discounted (20-40% of original)
     const template = findEquipmentTemplate(sale.item.name, sale.cat);
-    const price = template ? Math.floor(template.cost * qty * (0.2 + Math.random() * 0.2)) : qty;
+    const price = template ? Math.floor(getEquipmentUnitCost(template, sale.cat) * qty * (0.2 + Math.random() * 0.2)) : qty;
     
     // Remove from seller
     sale.item.quantity = (sale.item.quantity || 1) - qty;
@@ -1738,7 +2543,7 @@ function processTechUpgradeSales(nation) {
       condition: 50 + Math.floor(Math.random() * 30), // Used equipment
     });
     
-    addNews(`🔄 ${nation.name} sells ${qty}x ${sale.item.name} to ${buyer.name} ($${price}M)`, 'minor');
+    addNews(`🔄 ${nation.name} sells ${formatEquipmentDisplayQuantity(sale.cat, qty)} ${sale.item.name} to ${buyer.name} ($${price}M)`, 'minor');
   });
   
   // Clean up zero-quantity items
@@ -1759,8 +2564,8 @@ function renderNationMilitaryForces(nation) {
   
   let html = '<div class="section-card"><h4>👥 Personnel</h4>';
   html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">';
-  html += '<div class="resource-item"><span class="r-name">Active Duty</span><span class="r-val">' + Math.round(activeDuty * 1000).toLocaleString() + '</span></div>';
-  html += '<div class="resource-item"><span class="r-name">Reserves</span><span class="r-val">' + Math.round(reserves * 1000).toLocaleString() + '</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Active Duty</span><span class="r-val">' + formatMilitaryQuantity(activeDuty * 1000000) + '</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Reserves</span><span class="r-val">' + formatMilitaryQuantity(reserves * 1000000) + '</span></div>';
   html += '<div class="resource-item"><span class="r-name">Readiness</span><span class="r-val" style="color:' + (readiness >= 70 ? 'var(--accent-green)' : readiness >= 40 ? 'var(--accent-yellow)' : 'var(--accent-red)') + '">' + readiness.toFixed(1) + '%</span></div>';
   html += '<div class="resource-item"><span class="r-name">Maintenance</span><span class="r-val" style="color:var(--accent-red)">$' + maintenance.toFixed(1) + 'M</span></div>';
   html += '</div></div>';
@@ -1779,12 +2584,30 @@ function renderNationMilitaryForces(nation) {
   Object.keys(equipLabels).forEach(type => {
     if (forces[type]) {
       const f = forces[type];
+      const displayCategoryMap = {
+        fighters: 'fighter',
+        bombers: 'bomber',
+        helicopters: 'helicopter',
+        transport: 'transport',
+        tanks: 'tank',
+        ifvs: 'ifv',
+        artillery: 'artillery',
+        destroyers: 'destroyer',
+        submarines: 'submarine',
+        carriers: 'carrier',
+        patrol: 'patrol',
+        missileSystems: 'missile',
+        drones: 'drone',
+        satellites: 'satellite',
+        rifles: 'rifle'
+      };
+      const displayCategory = displayCategoryMap[type] || type;
       html += '<div style="padding:4px 6px;background:rgba(9,28,54,0.4);border-radius:4px;border:1px solid var(--border-color)">';
       html += '<div style="font-weight:600;font-size:11px;color:var(--text-secondary)">' + equipLabels[type] + '</div>';
       html += '<div style="display:flex;gap:6px;font-size:10px;margin-top:2px">';
-      html += '<span style="color:var(--accent-blue)">Active: ' + f.active + '</span>';
-      if (f.reserve > 0) html += '<span style="color:var(--text-muted)">Res: ' + f.reserve + '</span>';
-      if (f.mothballed > 0) html += '<span style="color:var(--accent-red)">Moth: ' + f.mothballed + '</span>';
+      html += '<span style="color:var(--accent-blue)">Active: ' + formatEquipmentDisplayQuantity(displayCategory, f.active) + '</span>';
+      if (f.reserve > 0) html += '<span style="color:var(--text-muted)">Res: ' + formatEquipmentDisplayQuantity(displayCategory, f.reserve) + '</span>';
+      if (f.mothballed > 0) html += '<span style="color:var(--accent-red)">Moth: ' + formatEquipmentDisplayQuantity(displayCategory, f.mothballed) + '</span>';
       html += '</div></div>';
     }
   });
@@ -1805,12 +2628,156 @@ function initDefenseRevenue(nation) {
   if (nation.defenseRevenue === undefined) nation.defenseRevenue = 0;
   if (nation.defenseSpending === undefined) nation.defenseSpending = 0;
   if (nation.armsDeals === undefined) nation.armsDeals = [];
+  if (nation.pendingArmsOrders === undefined) nation.pendingArmsOrders = [];
+  if (nation.defenseMarketShare === undefined) nation.defenseMarketShare = 1 / 3;
+}
+
+function isAlliedNation(aId, bId) {
+  return GAME.alliances.some(a =>
+    (a.a === aId && a.b === bId) ||
+    (a.b === aId && a.a === bId)
+  );
+}
+
+function getDefenseMarketShare(nation) {
+  initDefenseRevenue(nation);
+  return clamp(Number(nation.defenseMarketShare) || 0.45, 0.2, 0.75);
+}
+
+function getExportReadyQuantity(nation, item) {
+  const qty = Math.max(0, Number(item?.quantity) || 0);
+  if (qty <= 0) return 0;
+  
+  // Check if this equipment can be exported (only lower-tier equipment can be sold)
+  if (!canSellEquipment(nation, item)) return 0;
+  
+  return Math.floor(qty * getDefenseMarketShare(nation));
+}
+
+function addEquipmentToStockpile(nation, category, itemName, quantity, condition) {
+  if (!nation.militaryStockpile) nation.militaryStockpile = {};
+  if (!nation.militaryStockpile[category]) nation.militaryStockpile[category] = [];
+
+  const existing = nation.militaryStockpile[category].find(item => item.name === itemName);
+  if (existing) {
+    existing.quantity = (existing.quantity || 0) + quantity;
+    existing.condition = Math.max(existing.condition || 0, condition || 100);
+    return;
+  }
+
+  nation.militaryStockpile[category].push({
+    name: itemName,
+    cat: category,
+    quantity,
+    condition: condition || 100,
+  });
+}
+
+function reserveEquipmentForExport(sellerNation, itemName, category, quantity) {
+  const stockArr = sellerNation.militaryStockpile?.[category] || [];
+  let remaining = Math.max(0, Math.floor(quantity || 0));
+  let moved = 0;
+  let conditionWeighted = 0;
+
+  for (let i = stockArr.length - 1; i >= 0 && remaining > 0; i--) {
+    const item = stockArr[i];
+    if (item.name !== itemName) continue;
+
+    const exportable = getExportReadyQuantity(sellerNation, item);
+    if (exportable <= 0) continue;
+
+    const take = Math.min(remaining, exportable);
+    item.quantity = Math.max(0, (item.quantity || 0) - take);
+    moved += take;
+    remaining -= take;
+    conditionWeighted += take * (item.condition || 100);
+
+    if (item.quantity <= 0) {
+      stockArr.splice(i, 1);
+    }
+  }
+
+  if (moved <= 0) return null;
+
+  return {
+    quantity: moved,
+    condition: Math.round(conditionWeighted / moved) || 100,
+  };
+}
+
+function getDefenseMarketPrice(template, condition) {
+  const conditionMultiplier = 0.7 + ((condition || 100) / 100) * 0.3;
+  return Math.max(1, Math.ceil(getEquipmentUnitCost(template, template?.cat) * 0.9 * conditionMultiplier));
+}
+
+function getArmsOrderLeadTime(sellerNation, buyerNation, category, quantity) {
+  const avgTech = ((sellerNation.techLevel || 1) + (buyerNation.techLevel || 1)) / 2;
+  const allied = isAlliedNation(sellerNation.id, buyerNation.id);
+  const heavyCategory = ['tank', 'fighter', 'destroyer', 'submarine', 'carrier', 'missile', 'artillery'].includes(category);
+  const volumePenalty = quantity >= 5 ? 1 : 0;
+  const baseLead = 7 + (heavyCategory ? 1 : 0) + volumePenalty;
+  return clamp(Math.round(baseLead - avgTech * 0.55 - (allied ? 1 : 0)), 1, 9);
+}
+
+function queueDefenseMarketOrder(sellerNation, buyerNation, itemName, category, quantity, pricePerUnit, reason) {
+  initDefenseRevenue(sellerNation);
+  initDefenseRevenue(buyerNation);
+
+  const reserved = reserveEquipmentForExport(sellerNation, itemName, category, quantity);
+  if (!reserved || reserved.quantity <= 0) return false;
+
+  const totalPrice = Math.max(1, Math.ceil(pricePerUnit * reserved.quantity));
+  const paymentSuccess = processArmsPayment(sellerNation, buyerNation, totalPrice);
+  if (!paymentSuccess) {
+    addEquipmentToStockpile(sellerNation, category, itemName, reserved.quantity, reserved.condition);
+    return false;
+  }
+
+  const etaTurns = getArmsOrderLeadTime(sellerNation, buyerNation, category, reserved.quantity);
+  buyerNation.pendingArmsOrders.push({
+    sellerId: sellerNation.id,
+    sellerName: sellerNation.name,
+    itemName,
+    cat: category,
+    quantity: reserved.quantity,
+    condition: reserved.condition,
+    etaTurn: (GAME.turn || 0) + etaTurns,
+    orderedTurn: GAME.turn || 0,
+    totalPrice,
+    reason: reason || 'market',
+  });
+
+  addNews(`📦 ${buyerNation.name} orders ${formatEquipmentDisplayQuantity(category, reserved.quantity)} ${itemName} from ${sellerNation.name} via the Defence Market. ETA ${etaTurns} turns.`, 'minor');
+  return true;
+}
+
+function processPendingDefenseOrders() {
+  Object.values(NATIONS).forEach(nation => {
+    if (nation.failedState) return;
+    initDefenseRevenue(nation);
+
+    const pending = nation.pendingArmsOrders || [];
+    if (!pending.length) return;
+
+    const remainingOrders = [];
+    pending.forEach(order => {
+      if ((GAME.turn || 0) < (order.etaTurn || 0)) {
+        remainingOrders.push(order);
+        return;
+      }
+
+      addEquipmentToStockpile(nation, order.cat, order.itemName, order.quantity, order.condition);
+      addNews(`🚚 ${nation.name} receives ${formatEquipmentDisplayQuantity(order.cat, order.quantity)} ${order.itemName} from ${order.sellerName}.`, 'minor');
+    });
+
+    nation.pendingArmsOrders = remainingOrders;
+  });
 }
 
 // ─── PROCESS PAYMENT ──────────────────────────────────
 // Properly transfer money between nations
 
-function processArmsPayment(sellerNation, buyerNation, price) {
+function processArmsPayment(sellerNation, buyerNation, price, meta) {
   // Price is in $M (millions)
   // Buyer pays from their treasury if player, or from GDP if AI
   const isPlayerBuyer = buyerNation.id === GAME.playerNation?.id;
@@ -1823,8 +2790,9 @@ function processArmsPayment(sellerNation, buyerNation, price) {
   } else {
     // AI buyers: pay from budget, cap at % of GDP
     const aiMonthlyBudget = (buyerNation.gdp * 1000) / 12; // GDP in $M / month
-    const maxArmsSpend = aiMonthlyBudget * 0.3; // Max 30% of monthly budget on arms
-    if (price > maxArmsSpend * 3) return false; // Can't spend more than 3 months budget
+    const strategy = getNationDefenseBuyingStrategy(buyerNation);
+    const maxArmsSpend = aiMonthlyBudget * (strategy.mode === 'volume' ? 0.78 : 0.62);
+    if (price > maxArmsSpend * (strategy.mode === 'volume' ? 10 : 7)) return false;
     buyerNation.defenseSpending = (buyerNation.defenseSpending || 0) + price;
   }
   
@@ -1834,6 +2802,23 @@ function processArmsPayment(sellerNation, buyerNation, price) {
   }
   // Track revenue
   sellerNation.defenseRevenue = (sellerNation.defenseRevenue || 0) + price;
+
+  // Track per-company revenue and customers
+  const sourceCompanyId = meta?.sourceCompanyId || null;
+  if (sourceCompanyId) {
+    const sourceCompany = DEFENSE_COMPANIES.find(c => c.id === sourceCompanyId);
+    if (sourceCompany) {
+      sourceCompany.totalRevenue = (sourceCompany.totalRevenue || 0) + price;
+      sourceCompany.totalSales = (sourceCompany.totalSales || 0) + Math.max(0, Number(meta?.quantity || 0));
+      if (!sourceCompany.customers) sourceCompany.customers = {};
+      const buyerId = buyerNation.id || buyerNation.name;
+      sourceCompany.customers[buyerId] = (sourceCompany.customers[buyerId] || 0) + 1;
+      // Record price history for market movers
+      if (!sourceCompany.priceHistory) sourceCompany.priceHistory = [];
+      sourceCompany.priceHistory.push({ turn: GAME.turn || 0, revenue: price });
+      if (sourceCompany.priceHistory.length > 20) sourceCompany.priceHistory.shift();
+    }
+  }
   
   // Record the deal
   if (!sellerNation.armsDeals) sellerNation.armsDeals = [];
@@ -1849,44 +2834,25 @@ function processArmsPayment(sellerNation, buyerNation, price) {
 
 // ─── GET EQUIPMENT CATALOG FROM A NATION ──────────────
 
-function getNationEquipmentCatalog(nation) {
+function getNationEquipmentCatalog(nation, options) {
+  const exportOnly = !!(options && options.exportOnly);
   const catalog = [];
   
   // From stockpile
   const stockpile = nation.militaryStockpile || {};
   Object.keys(stockpile).forEach(cat => {
     (stockpile[cat] || []).forEach(item => {
-      if ((item.quantity || 0) > 0) {
+      const availableQty = exportOnly ? getExportReadyQuantity(nation, item) : (item.quantity || 0);
+      if (availableQty > 0) {
         catalog.push({
           name: item.name,
           cat: cat,
-          quantity: item.quantity,
+          quantity: availableQty,
+          stockQuantity: item.quantity || 0,
           condition: item.condition || 100,
           source: 'stockpile',
           sourceId: null
         });
-      }
-    });
-  });
-  
-  // From defense company production
-  const companies = getNationDefenseCompanies(nation);
-  companies.forEach(company => {
-    (company.equipment || []).forEach(eq => {
-      const produced = eq.produced || 0;
-      if (produced > 0) {
-        // Check if already in stockpile catalog
-        const inStockpile = catalog.find(c => c.name === eq.name && c.cat === eq.cat);
-        if (!inStockpile) {
-          catalog.push({
-            name: eq.name,
-            cat: eq.cat,
-            quantity: produced,
-            condition: 100,
-            source: 'company',
-            sourceId: company.id
-          });
-        }
       }
     });
   });
@@ -1897,26 +2863,27 @@ function getNationEquipmentCatalog(nation) {
 // ─── ARMS MARKET: Nations WITHOUT defense contractors buy from others ──
 
 function processGlobalArmsMarket() {
-  // For each nation that has NO defense companies, try to buy equipment
+  // Nations with low stock can place import orders through allied or friendly defense markets.
   Object.values(NATIONS).forEach(buyerNation => {
     if (buyerNation.failedState) return;
     
     initDefenseRevenue(buyerNation);
+    initNationMilitaryForces(buyerNation);
     const buyerCompanies = getNationDefenseCompanies(buyerNation);
-    
-    // Only nations without (or very few) defense companies buy
-    if (buyerCompanies.length >= 2) return;
-    
+
     // Check if they already have a decent stockpile
     const stockpile = buyerNation.militaryStockpile || {};
     const totalItems = Object.values(stockpile).reduce((sum, arr) => sum + arr.reduce((s, i) => s + (i.quantity || 0), 0), 0);
+    const activePersonnel = Math.max(0, Number(buyerNation.militaryForces?.activePersonnel) || 0);
+    const stockNeedThreshold = Math.max(4, Math.round(buyerNation.militaryPower * 2.4 + activePersonnel * 120));
     
     // Only buy if they need equipment (low stockpile)
-    if (totalItems > buyerNation.militaryPower * 2) return;
+    if (totalItems > stockNeedThreshold && buyerCompanies.length > 0) return;
     
     // Check if they can afford it
     const monthlyGDP = (buyerNation.gdp * 1000) / 12; // $M per month
-    const maxArmsBudget = monthlyGDP * 0.2 * (buyerNation.techLevel / 5); // More advanced = more arms spending
+    const strategy = getNationDefenseBuyingStrategy(buyerNation);
+    const maxArmsBudget = monthlyGDP * (strategy.mode === 'volume' ? 0.62 : 0.48) * clamp(buyerNation.techLevel / 5, 0.6, 2.2);
     
     if (maxArmsBudget < 5) return; // Too poor to buy anything
     
@@ -1928,10 +2895,7 @@ function processGlobalArmsMarket() {
       
       // Check relation
       const rel = (typeof getRelationBetween === 'function' ? getRelationBetween(buyerNation.id, seller.id) : getRelation(seller.id));
-      const isAlly = GAME.alliances.some(a => 
-        (a.a === buyerNation.id && a.b === seller.id) || 
-        (a.b === buyerNation.id && a.a === seller.id)
-      );
+      const isAlly = isAlliedNation(buyerNation.id, seller.id);
       
       return isAlly || rel > 0; // Allies or positive relations
     });
@@ -1944,7 +2908,8 @@ function processGlobalArmsMarket() {
     equipTypes.forEach(cat => {
       const items = stockpile[cat] || [];
       const total = items.reduce((s, i) => s + (i.quantity || 0), 0);
-      if (total < 2) neededCategories.push(cat); // Need at least 2 of each type
+      const baseline = cat === 'rifle' ? 8 : 2;
+      if (total < baseline) neededCategories.push(cat);
     });
     
     // If they have most things, just buy random upgrades
@@ -1956,69 +2921,75 @@ function processGlobalArmsMarket() {
     const needCat = neededCategories[Math.floor(Math.random() * neededCategories.length)];
     
     // Pick a seller
-    const seller = potentialSellers[Math.floor(Math.random() * potentialSellers.length)];
-    const sellerCatalog = getNationEquipmentCatalog(seller);
+    const sortedSellers = potentialSellers
+      .map(seller => {
+        const sellerCatalog = getNationEquipmentCatalog(seller, { exportOnly: true });
+        const exportQty = sellerCatalog
+          .filter(item => item.cat === needCat)
+          .reduce((sum, item) => sum + (item.quantity || 0), 0);
+        const rel = (typeof getRelationBetween === 'function' ? getRelationBetween(buyerNation.id, seller.id) : getRelation(seller.id));
+        const allied = isAlliedNation(buyerNation.id, seller.id);
+        return { seller, sellerCatalog, exportQty, score: exportQty + (allied ? 12 : 0) + rel * 0.2 };
+      })
+      .filter(entry => entry.exportQty > 0)
+      .sort((a, b) => b.score - a.score);
+
+    if (sortedSellers.length === 0) return;
+
+    const { seller, sellerCatalog } = sortedSellers[0];
     
-    // Find matching items
-    const matchingItems = sellerCatalog.filter(item => item.cat === needCat && item.quantity > 0);
-    if (matchingItems.length === 0) return;
+    // Package deal: buy multiple equipment types at once
+    const packageSize = clamp(1 + Math.floor(Math.random() * 3), 1, 4);
+    const selectedCategories = neededCategories.slice(0, packageSize);
     
-    // Pick an item
-    const item = matchingItems[Math.floor(Math.random() * matchingItems.length)];
-    const qty = Math.min(item.quantity, 1 + Math.floor(Math.random() * 3));
+    let totalPackagePrice = 0;
+    const packageItems = [];
     
-    // Calculate price (market rate: supply/demand)
-    const template = findEquipmentTemplate(item.name, needCat);
-    if (!template) return;
-    
-    // Base price: 80-120% of template cost, higher for better condition
-    const conditionMultiplier = 0.7 + (item.condition / 100) * 0.3;
-    const pricePerUnit = template.cost * (0.8 + Math.random() * 0.4) * conditionMultiplier;
-    const totalPrice = Math.ceil(pricePerUnit * qty);
-    
-    // Check buyer can afford
-    if (totalPrice > maxArmsBudget) return;
-    
-    // Process the sale
-    // Remove from seller's stockpile
-    if (item.source === 'stockpile') {
-      const stockArr = seller.militaryStockpile[needCat] || [];
-      let remaining = qty;
-      for (let i = stockArr.length - 1; i >= 0 && remaining > 0; i--) {
-        if (stockArr[i].name === item.name) {
-          const take = Math.min(remaining, stockArr[i].quantity || 1);
-          stockArr[i].quantity = (stockArr[i].quantity || 1) - take;
-          remaining -= take;
-          if (stockArr[i].quantity <= 0) {
-            stockArr.splice(i, 1);
-          }
-        }
+    for (const needCat of selectedCategories) {
+      // Find matching items
+      const matchingItems = sellerCatalog.filter(item => item.cat === needCat && item.quantity > 0);
+      if (matchingItems.length === 0) continue;
+      
+      // Pick an item
+      const item = matchingItems[Math.floor(Math.random() * matchingItems.length)];
+      const qtyCeiling = strategy.mode === 'volume'
+        ? (needCat === 'rifle' ? (70 + Math.floor(Math.random() * 110)) : (18 + Math.floor(Math.random() * 44)))
+        : (needCat === 'rifle' ? (18 + Math.floor(Math.random() * 32)) : (3 + Math.floor(Math.random() * 11)));
+      const qty = Math.min(item.quantity, qtyCeiling);
+      
+      // Calculate price (market rate: supply/demand)
+      const template = findEquipmentTemplate(item.name, needCat);
+      if (!template) continue;
+      
+      const pricePerUnit = getDefenseMarketPrice(template, item.condition);
+      const itemTotalPrice = Math.ceil(pricePerUnit * qty);
+      
+      // Check if adding this item would exceed budget
+      if (totalPackagePrice + itemTotalPrice > maxArmsBudget) {
+        // Try smaller quantity
+        const affordableQty = Math.floor((maxArmsBudget - totalPackagePrice) / pricePerUnit);
+        if (affordableQty < 1) continue;
+        packageItems.push({ item, needCat, qty: affordableQty, pricePerUnit, totalPrice: pricePerUnit * affordableQty });
+        totalPackagePrice += pricePerUnit * affordableQty;
+        break;
       }
+      
+      packageItems.push({ item, needCat, qty, pricePerUnit, totalPrice: itemTotalPrice });
+      totalPackagePrice += itemTotalPrice;
     }
     
-    // Process payment
-    const paymentSuccess = processArmsPayment(seller, buyerNation, totalPrice);
-    if (!paymentSuccess) return;
+    if (packageItems.length === 0) return;
     
-    // Add to buyer's stockpile
-    if (!buyerNation.militaryStockpile) buyerNation.militaryStockpile = {};
-    if (!buyerNation.militaryStockpile[needCat]) buyerNation.militaryStockpile[needCat] = [];
-    
-    const existing = buyerNation.militaryStockpile[needCat].find(s => s.name === item.name);
-    if (existing) {
-      existing.quantity = (existing.quantity || 1) + qty;
-      existing.condition = item.condition || 100;
-    } else {
-      buyerNation.militaryStockpile[needCat].push({
-        name: item.name,
-        cat: needCat,
-        quantity: qty,
-        condition: item.condition || 100,
-      });
+    // Queue all items in the package deal
+    for (const pkg of packageItems) {
+      queueDefenseMarketOrder(seller, buyerNation, pkg.item.name, pkg.needCat, pkg.qty, pkg.pricePerUnit, buyerCompanies.length > 0 ? 'restock' : 'import');
     }
     
-    // News
-    addNews(`🛒 ${buyerNation.name} buys ${qty}x ${item.name} from ${seller.name} for $${totalPrice}M`, 'minor');
+    // News for package deals
+    if (packageItems.length > 1 && (Math.random() < 0.3)) {
+      const summary = packageItems.map(p => `${p.qty} ${p.needCat}`).join(', ');
+      addNews(`📦 ${buyerNation.flag || '🏳️'} ${buyerNation.name} purchased package from ${seller.name}: ${summary}.`, 'minor');
+    }
   });
 }
 
@@ -2085,39 +3056,22 @@ function processTechUpgradeSalesWithPayment(nation) {
     if (Math.random() > saleChance) return;
     
     const buyer = potentialBuyers[Math.floor(Math.random() * potentialBuyers.length)];
-    const qty = Math.min(sale.item.quantity || 1, 1 + Math.floor(Math.random() * 3));
+    const qty = Math.min(getExportReadyQuantity(nation, sale.item), 1 + Math.floor(Math.random() * 3));
+    if (qty <= 0) return;
     
     const template = findEquipmentTemplate(sale.item.name, sale.cat);
     if (!template) return;
     
     // Price: discounted based on era difference (older = cheaper)
     const discount = 0.15 + (sale.eraDiff - 1) * 0.1;
-    const pricePerUnit = Math.max(1, Math.floor(template.cost * clamp(discount + Math.random() * 0.15, 0.1, 0.6)));
+    const pricePerUnit = Math.max(1, Math.floor(getEquipmentUnitCost(template, sale.cat) * clamp(discount + Math.random() * 0.15, 0.1, 0.6)));
     const totalPrice = pricePerUnit * qty;
     
     // Check buyer affordability
     const buyerMonthlyBudget = (buyer.gdp * 1000) / 12;
     if (totalPrice > buyerMonthlyBudget * 0.5) return;
     
-    // Process payment
-    const paymentSuccess = processArmsPayment(nation, buyer, totalPrice);
-    if (!paymentSuccess) return;
-    
-    // Remove from seller
-    sale.item.quantity = (sale.item.quantity || 1) - qty;
-    if (sale.item.quantity <= 0) sale.item.quantity = 0;
-    
-    // Add to buyer
-    if (!buyer.militaryStockpile) buyer.militaryStockpile = {};
-    if (!buyer.militaryStockpile[sale.cat]) buyer.militaryStockpile[sale.cat] = [];
-    buyer.militaryStockpile[sale.cat].push({
-      name: sale.item.name,
-      cat: sale.cat,
-      quantity: qty,
-      condition: 40 + Math.floor(Math.random() * 35), // Used equipment = lower condition
-    });
-    
-    addNews(`🔄 ${nation.name} sells ${qty}x ${sale.item.name} to ${buyer.name} for $${totalPrice}M`, 'minor');
+    queueDefenseMarketOrder(nation, buyer, sale.item.name, sale.cat, qty, pricePerUnit, 'upgrade-sale');
   });
   
   // Clean up zero-quantity items
@@ -2129,7 +3083,9 @@ function processTechUpgradeSalesWithPayment(nation) {
 // ─── HOOK: Process arms market every turn ─────────────
 
 function processArmsMarketAll() {
-  // 1. Nations without defense companies buy from allies/neutrals
+  processPendingDefenseOrders();
+
+  // 1. Nations with low stock can place market orders with exporters.
   processGlobalArmsMarket();
   
   // 2. Tech upgrade sales for all AI nations (player handled separately)
@@ -2146,15 +3102,34 @@ function renderDefenseRevenueSection(nation) {
   const revenue = nation.defenseRevenue || 0;
   const spending = nation.defenseSpending || 0;
   const deals = nation.armsDeals || [];
+  const pendingOrders = nation.pendingArmsOrders || [];
+  const exportReadyTotal = getNationEquipmentCatalog(nation, { exportOnly: true }).reduce((sum, item) => sum + (item.quantity || 0), 0);
   
-  let html = '<div class="section-card"><h4>💰 Defense Trade</h4>';
+  let html = '<div class="section-card"><h4>💰 Defence Market</h4>';
   
   html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">';
   html += '<div class="resource-item"><span class="r-name">Arms Revenue</span><span class="r-val" style="color:var(--accent-green)">$' + revenue.toFixed(1) + 'M</span></div>';
   html += '<div class="resource-item"><span class="r-name">Arms Spending</span><span class="r-val" style="color:var(--accent-red)">$' + spending.toFixed(1) + 'M</span></div>';
   html += '<div class="resource-item"><span class="r-name">Trade Balance</span><span class="r-val" style="color:' + ((revenue - spending) >= 0 ? 'var(--accent-green)' : 'var(--accent-red)') + '">$' + (revenue - spending).toFixed(1) + 'M</span></div>';
   html += '<div class="resource-item"><span class="r-name">Total Deals</span><span class="r-val">' + deals.length + '</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Export Ready</span><span class="r-val">' + exportReadyTotal + '</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Inbound Orders</span><span class="r-val">' + pendingOrders.length + '</span></div>';
   html += '</div>';
+
+  html += '<div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px">Roughly ' + Math.round(getDefenseMarketShare(nation) * 100) + '% of military stock is reserved for the Defence Market. The rest stays in national reserve.</div>';
+
+  if (pendingOrders.length > 0) {
+    html += '<div style="font-size:11px;color:var(--text-secondary);margin-top:6px;margin-bottom:6px">';
+    html += '<div style="font-weight:600;margin-bottom:4px;color:var(--text-muted)">Inbound Orders:</div>';
+    pendingOrders.slice(0, 4).forEach(order => {
+      const eta = Math.max(0, (order.etaTurn || 0) - (GAME.turn || 0));
+      html += '<div style="padding:2px 4px;border-bottom:1px solid rgba(84,140,196,0.12);display:flex;justify-content:space-between">';
+      html += '<span>' + order.itemName + ' x' + formatEquipmentDisplayQuantity(order.cat, order.quantity) + '</span>';
+      html += '<span style="color:var(--accent-blue)">ETA ' + eta + '</span>';
+      html += '</div>';
+    });
+    html += '</div>';
+  }
   
   // Recent deals
   if (deals.length > 0) {
@@ -2182,12 +3157,12 @@ function renderArmsPurchaseUI() {
   
   const hasCompanies = getNationDefenseCompanies(p).length > 0;
   
-  let html = '<div class="section-card"><h4>🌐 International Arms Market</h4>';
+  let html = '<div class="section-card"><h4>🌐 Global Defence Market</h4>';
   
   if (hasCompanies) {
-    html += '<p class="text-muted" style="font-size:11px;margin-bottom:8px">Your nation has defense contractors. Other nations may purchase your equipment. Revenue is tracked above.</p>';
+    html += '<p class="text-muted" style="font-size:11px;margin-bottom:8px">Your nation has defense contractors. About one third of stock is export-ready, and foreign orders arrive after a tech-based delivery delay.</p>';
   } else {
-    html += '<p class="text-muted" style="font-size:11px;margin-bottom:8px">Your nation lacks defense contractors. Purchase equipment from allies and friendly nations below.</p>';
+    html += '<p class="text-muted" style="font-size:11px;margin-bottom:8px">Your nation can place import orders with allies and friendly exporters. Deliveries take longer for lower-tech logistics.</p>';
   }
   
   // Find potential sellers (allies + friendly nations with defense companies)
@@ -2196,9 +3171,7 @@ function renderArmsPurchaseUI() {
     const sellerCompanies = getNationDefenseCompanies(seller);
     if (sellerCompanies.length === 0) return false;
     const rel = (typeof getRelationBetween === 'function' ? getRelationBetween(p.id, seller.id) : getRelation(seller.id));
-    const isAlly = GAME.alliances.some(a => 
-      (a.a === p.id && a.b === seller.id) || (a.b === p.id && a.a === seller.id)
-    );
+    const isAlly = isAlliedNation(p.id, seller.id);
     return isAlly || rel > 15;
   });
   
@@ -2207,7 +3180,7 @@ function renderArmsPurchaseUI() {
   } else {
     html += '<div style="max-height:200px;overflow-y:auto">';
     potentialSellers.forEach(seller => {
-      const catalog = getNationEquipmentCatalog(seller);
+      const catalog = getNationEquipmentCatalog(seller, { exportOnly: true });
       if (catalog.length === 0) return;
       
       html += '<div style="background:rgba(9,28,54,0.5);border:1px solid var(--border-color);border-radius:6px;padding:8px;margin-bottom:6px">';
@@ -2215,12 +3188,15 @@ function renderArmsPurchaseUI() {
       
       catalog.slice(0, 5).forEach(item => {
         const template = findEquipmentTemplate(item.name, item.cat);
-        const pricePerUnit = template ? Math.ceil(template.cost * (0.8 + Math.random() * 0.3)) : 5;
+        const pricePerUnit = getDefenseMarketPrice(template, item.condition);
+        const etaTurns = getArmsOrderLeadTime(seller, p, item.cat, 1);
+        const orderLabel = item.cat === 'rifle' ? 'Order 1,000' : 'Order 1';
         html += '<div style="display:flex;align-items:center;gap:6px;padding:2px 4px;font-size:11px;border-bottom:1px solid rgba(84,140,196,0.1)">';
         html += '<span style="flex:1">' + item.name + '</span>';
-        html += '<span style="color:var(--text-muted)">x' + item.quantity + '</span>';
+        html += '<span style="color:var(--text-muted)">x' + formatEquipmentDisplayQuantity(item.cat, item.quantity) + '</span>';
         html += '<span style="color:var(--accent-yellow)">$' + pricePerUnit + 'M</span>';
-        html += '<button class="btn-small" onclick="buyFromArmsMarket(\'' + seller.id + '\',\'' + item.name + '\',\'' + item.cat + '\',1)">Buy 1</button>';
+        html += '<span style="color:var(--accent-blue);font-size:10px">ETA ' + etaTurns + '</span>';
+        html += '<button class="btn-small" onclick="buyFromArmsMarket(\'' + seller.id + '\',\'' + item.name + '\',\'' + item.cat + '\',1)">' + orderLabel + '</button>';
         html += '</div>';
       });
       
@@ -2248,12 +3224,11 @@ window.buyFromArmsMarket = function(sellerId, itemName, category, quantity) {
   initDefenseRevenue(seller);
   
   // Find the item in seller's stockpile
-  const stockpile = seller.militaryStockpile || {};
-  const items = stockpile[category] || [];
-  const item = items.find(i => i.name === itemName);
+  const catalog = getNationEquipmentCatalog(seller, { exportOnly: true });
+  const item = catalog.find(i => i.name === itemName && i.cat === category);
   
   if (!item || (item.quantity || 0) < quantity) {
-    addNews('⚠ ' + seller.name + ' does not have enough ' + itemName + ' in stock', 'minor');
+    addNews('⚠ ' + seller.name + ' does not have enough export-ready ' + itemName + ' in stock', 'minor');
     return false;
   }
   
@@ -2261,41 +3236,23 @@ window.buyFromArmsMarket = function(sellerId, itemName, category, quantity) {
   if (!template) return false;
   
   // Price
-  const conditionMultiplier = 0.7 + ((item.condition || 100) / 100) * 0.3;
-  const pricePerUnit = Math.ceil(template.cost * 0.9 * conditionMultiplier);
+  const pricePerUnit = getDefenseMarketPrice(template, item.condition);
   const totalPrice = pricePerUnit * quantity;
   
   // Check affordability
   if (GAME.treasury < totalPrice) {
-    addNews('⚠ Insufficient funds! Need $' + totalPrice + 'M for ' + quantity + 'x ' + itemName, 'minor');
+    addNews('⚠ Insufficient funds! Need $' + totalPrice + 'M for ' + formatEquipmentDisplayQuantity(category, quantity) + ' ' + itemName, 'minor');
     return false;
   }
   
-  // Process payment
-  const paymentSuccess = processArmsPayment(seller, buyer, totalPrice);
-  if (!paymentSuccess) return false;
-  
-  // Remove from seller
-  item.quantity = (item.quantity || 1) - quantity;
-  
-  // Add to buyer
-  if (!buyer.militaryStockpile) buyer.militaryStockpile = {};
-  if (!buyer.militaryStockpile[category]) buyer.militaryStockpile[category] = [];
-  
-  const existing = buyer.militaryStockpile[category].find(s => s.name === itemName);
-  if (existing) {
-    existing.quantity = (existing.quantity || 1) + quantity;
-    existing.condition = item.condition || 100;
-  } else {
-    buyer.militaryStockpile[category].push({
-      name: itemName,
-      cat: category,
-      quantity: quantity,
-      condition: item.condition || 100,
-    });
+  const orderSuccess = queueDefenseMarketOrder(seller, buyer, itemName, category, quantity, pricePerUnit, 'player-order');
+  if (!orderSuccess) {
+    addNews('⚠ Unable to place market order for ' + itemName, 'minor');
+    return false;
   }
-  
-  addNews('✅ Purchased ' + quantity + 'x ' + itemName + ' from ' + seller.name + ' for $' + totalPrice + 'M', 'major');
+
+  const etaTurns = getArmsOrderLeadTime(seller, buyer, category, quantity);
+  addNews('✅ Ordered ' + formatEquipmentDisplayQuantity(category, quantity) + ' ' + itemName + ' from ' + seller.name + ' for $' + totalPrice + 'M. ETA ' + etaTurns + ' turns.', 'major');
   
   // Re-render
   if (typeof renderGame === 'function') renderGame();
@@ -2306,9 +3263,9 @@ window.buyFromArmsMarket = function(sellerId, itemName, category, quantity) {
 
 function renderArmsPurchaseUIForNation(nation) {
   initDefenseRevenue(nation);
-  const catalog = getNationEquipmentCatalog(nation);
+  const catalog = getNationEquipmentCatalog(nation, { exportOnly: true });
   
-  let html = '<div class="section-card"><h4>📦 Available for Export</h4>';
+  let html = '<div class="section-card"><h4>📦 Defence Market Export Stock</h4>';
   
   if (catalog.length === 0) {
     html += '<p class="empty">No equipment available for export.</p>';
@@ -2329,10 +3286,10 @@ function renderArmsPurchaseUIForNation(nation) {
     html += '<div class="equip-list">';
     items.slice(0, 4).forEach(item => {
       const template = findEquipmentTemplate(item.name, item.cat);
-      const estPrice = template ? Math.ceil(template.cost * 0.9) : 5;
+      const estPrice = template ? Math.ceil(getEquipmentUnitCost(template, item.cat) * 0.9) : 5;
       html += '<div class="equip-item">';
       html += '<span class="equip-name">' + item.name + '</span>';
-      html += '<span class="equip-qty">x' + item.quantity + '</span>';
+      html += '<span class="equip-qty">x' + formatEquipmentDisplayQuantity(item.cat, item.quantity) + '</span>';
       html += '<span style="color:var(--accent-yellow);font-size:10px">$' + estPrice + 'M</span>';
       html += '</div>';
     });
@@ -2349,4 +3306,293 @@ function renderArmsPurchaseUIForNation(nation) {
   html += '</div>';
   return html;
 }
+
+
+// ============================================================
+// DEFENSE COMPANIES REGISTRY — Standalone Tab
+// ============================================================
+
+// Government types that result in publicly listed (traded) companies
+const PUBLIC_GOV_TYPES = new Set([
+  'liberal_democracy', 'federal_republic', 'constitutional_monarchy',
+  'technocratic_council', 'parliamentary_democracy', 'republic',
+]);
+
+// Initialize per-company financial tracking fields
+function initDefenseCompanyFinancials(company) {
+  if (company.totalRevenue === undefined)     company.totalRevenue = 0;
+  if (company.totalResearchCost === undefined) company.totalResearchCost = 0;
+  if (company.totalSales === undefined)        company.totalSales = 0;
+  if (company.procurementSpend === undefined)   company.procurementSpend = 0;
+  if (company.unmetMaterialDemand === undefined) company.unmetMaterialDemand = 0;
+  if (!company.customers)                      company.customers = {};
+  if (!company.priceHistory)                   company.priceHistory = [];
+  if (!Array.isArray(company.pendingOrders))   company.pendingOrders = [];
+  if (!Array.isArray(company.completedOrders)) company.completedOrders = [];
+  if (!company.orderLedger || typeof company.orderLedger !== 'object') company.orderLedger = {};
+  if (!company.productionByCategory || typeof company.productionByCategory !== 'object') company.productionByCategory = {};
+  if (!Array.isArray(company.supplierRelations)) company.supplierRelations = [];
+}
+
+// Is the company publicly listed? Depends on founding nation's government type
+function isPublicDefenseCompany(company, foundingNation) {
+  if (!foundingNation) return false;
+  return PUBLIC_GOV_TYPES.has(foundingNation.governmentStyle || '');
+}
+
+// Total military power-points produced across all company equipment
+function computeCompanyPowerProduced(company) {
+  let total = 0;
+  (company.equipment || []).forEach(eq => {
+    const template = findEquipmentTemplate(eq.name, eq.cat);
+    if (!template) return;
+    const techFactor = clamp(0.75 + (template.techReq || 1) * 0.1, 0.8, 1.8);
+    const catWeights = { rifle:0.18, tank:3.2, fighter:4.8, bomber:4.8, carrier:12, submarine:6.5,
+      destroyer:6.5, missile:5.2, drone:3.5, satellite:3.5, artillery:2.6, ifv:1.8,
+      helicopter:1.8, transport:1.8, patrol:1.8 };
+    const w = catWeights[eq.cat] || 1.2;
+    total += (eq.produced || 0) * (template.power || 1) * techFactor * w;
+  });
+  return total;
+}
+
+// Market valuation: revenue base + tech premium + tier scale
+function getDefenseCompanyMarketValue(company) {
+  const rev = company.totalRevenue || 0;
+  const tier = company.tier || 1;
+  const tech = company.techLevel || 1;
+  const eqCount = (company.equipment || []).length;
+  return rev * 1.6 + tier * 120 + tech * 80 + eqCount * 40;
+}
+
+// UI state for the defense companies tab
+const DC_UI_STATE = { selectedCompany: null };
+
+// ── DETAIL VIEW ─────────────────────────────────────
+function renderDefenseCompanyDetail(co) {
+  const foundingNation = Object.values(NATIONS).find(n => n.id === co.foundedBy) || null;
+  const era = getEraForTechLevel(co.techLevel || 1);
+  const isPublic = isPublicDefenseCompany(co, foundingNation);
+  const totalPower = computeCompanyPowerProduced(co);
+  const pnl = (co.totalRevenue || 0) - (co.totalResearchCost || 0);
+  const pnlColor = pnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+  const pnlSign = pnl >= 0 ? '+' : '';
+
+  let html = '<div class="section-card" style="background:rgba(9,28,54,0.85);border:1px solid var(--accent-blue);margin-bottom:10px">';
+  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">';
+  html += '<div><div style="font-size:14px;font-weight:700">' + co.name + '</div>';
+  html += '<div style="font-size:11px;color:var(--text-muted)">' + co.desc + '</div></div>';
+  html += '<button class="btn-sm" data-defco-id="">✕ Close</button>';
+  html += '</div>';
+
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:6px;margin-bottom:8px">';
+  html += '<div class="resource-item"><span class="r-name">Founded By</span><span class="r-val">' + (foundingNation ? foundingNation.flag + ' ' + foundingNation.name : (co.foundedBy || '?')) + '</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Founded Turn</span><span class="r-val">T' + (co.foundedTurn || 0) + '</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Status</span><span class="r-val">' + (isPublic ? '📈 Public' : '🔒 Private') + '</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Tier / Era</span><span class="r-val">T' + co.tier + ' • ' + era.label + '</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Tech Level</span><span class="r-val">' + Number(co.techLevel || 1).toFixed(1) + '</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Equipment Lines</span><span class="r-val">' + (co.equipment ? co.equipment.length : 0) + '</span></div>';
+  html += '</div>';
+
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:6px;margin-bottom:8px">';
+  html += '<div class="resource-item"><span class="r-name">Total Revenue</span><span class="r-val" style="color:var(--accent-green)">$' + Number(co.totalRevenue || 0).toFixed(1) + 'M</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Research Cost</span><span class="r-val" style="color:var(--accent-red)">$' + Number(co.totalResearchCost || 0).toFixed(1) + 'M</span></div>';
+  html += '<div class="resource-item"><span class="r-name">P&L</span><span class="r-val" style="color:' + pnlColor + '">' + pnlSign + '$' + pnl.toFixed(1) + 'M</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Units Sold</span><span class="r-val">' + Number(co.totalSales || 0).toLocaleString() + '</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Power Produced</span><span class="r-val" style="color:var(--accent-blue)">' + Math.round(totalPower).toLocaleString() + ' pts</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Market Value</span><span class="r-val" style="color:var(--accent-yellow)">$' + getDefenseCompanyMarketValue(co).toFixed(1) + 'M</span></div>';
+  html += '</div>';
+
+  const producedByCat = {};
+  (co.equipment || []).forEach((eq) => {
+    const cat = eq.cat || 'other';
+    producedByCat[cat] = Number(producedByCat[cat] || 0) + Number(eq.produced || 0);
+  });
+  const producedRows = Object.entries(producedByCat).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  if (producedRows.length > 0) {
+    html += '<div style="margin-bottom:8px"><div style="font-size:11px;font-weight:600;margin-bottom:4px;color:var(--text-secondary)">Manufacturing Totals:</div>';
+    producedRows.forEach(([cat, qty]) => {
+      html += '<div style="font-size:11px;display:flex;justify-content:space-between;padding:2px 6px;border-bottom:1px solid rgba(84,140,196,0.1)">';
+      html += '<span>' + String(cat).toUpperCase() + '</span><span style="color:var(--accent-green)">' + formatEquipmentDisplayQuantity(cat, qty) + '</span>';
+      html += '</div>';
+    });
+    html += '</div>';
+  }
+
+  const suppliers = Array.isArray(co.supplierRelations) ? co.supplierRelations.slice(0, 3) : [];
+  if (suppliers.length > 0) {
+    html += '<div style="margin-bottom:8px"><div style="font-size:11px;font-weight:600;margin-bottom:4px;color:var(--text-secondary)">Main Suppliers (Top 3):</div>';
+    suppliers.forEach((supplier) => {
+      html += '<div style="font-size:11px;display:flex;justify-content:space-between;padding:2px 6px;border-bottom:1px solid rgba(84,140,196,0.1)">';
+      html += '<span>' + (supplier.name || 'Unknown') + '</span><span style="color:var(--accent-blue)">' + Number(supplier.units || 0).toLocaleString() + ' input units</span>';
+      html += '</div>';
+    });
+    html += '</div>';
+  }
+
+  const orderDestinations = Object.values(co.orderLedger || {}).sort((a, b) => Number(b.units || 0) - Number(a.units || 0)).slice(0, 6);
+  if (orderDestinations.length > 0) {
+    html += '<div style="margin-bottom:8px"><div style="font-size:11px;font-weight:600;margin-bottom:4px;color:var(--text-secondary)">Top Military Orders by Destination:</div>';
+    orderDestinations.forEach((dest) => {
+      const catBreakdown = Object.entries(dest.byCategory || {})
+        .sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0))
+        .slice(0, 2)
+        .map(([cat, qty]) => String(cat).toUpperCase() + ':' + Number(qty).toLocaleString())
+        .join(' • ');
+      html += '<div style="font-size:11px;display:flex;justify-content:space-between;gap:8px;padding:2px 6px;border-bottom:1px solid rgba(84,140,196,0.1)">';
+      html += '<span>' + (dest.nationName || 'Unknown') + (catBreakdown ? ' <span style="color:var(--text-muted)">(' + catBreakdown + ')</span>' : '') + '</span>';
+      html += '<span style="color:var(--accent-yellow)">' + Number(dest.units || 0).toLocaleString() + ' units</span>';
+      html += '</div>';
+    });
+    html += '</div>';
+  }
+
+  // Top customers
+  const customers = co.customers || {};
+  const topCustomers = Object.entries(customers).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  if (topCustomers.length > 0) {
+    html += '<div style="margin-bottom:8px"><div style="font-size:11px;font-weight:600;margin-bottom:4px;color:var(--text-secondary)">Top Customers:</div>';
+    topCustomers.forEach(([nid, deals]) => {
+      const nation = NATIONS[nid] || null;
+      const label = nation ? nation.flag + ' ' + nation.name : nid;
+      html += '<div style="font-size:11px;display:flex;justify-content:space-between;padding:2px 6px;border-bottom:1px solid rgba(84,140,196,0.1)">';
+      html += '<span>' + label + '</span><span style="color:var(--accent-blue)">' + deals + ' deal' + (deals > 1 ? 's' : '') + '</span>';
+      html += '</div>';
+    });
+    html += '</div>';
+  }
+
+  // Technologies developed
+  if (co.equipment && co.equipment.length > 0) {
+    html += '<div style="margin-bottom:4px"><div style="font-size:11px;font-weight:600;margin-bottom:4px;color:var(--text-secondary)">Technologies Developed (' + co.equipment.length + '):</div>';
+    html += '<div style="max-height:130px;overflow-y:auto">';
+    co.equipment.forEach(eq => {
+      html += '<div style="font-size:11px;display:flex;justify-content:space-between;padding:2px 6px;border-bottom:1px solid rgba(84,140,196,0.1)">';
+      html += '<span>' + eq.name + ' <span style="color:var(--text-muted)">(' + eq.cat + ')</span></span>';
+      html += '<span style="color:var(--accent-green)">Produced: ' + formatEquipmentDisplayQuantity(eq.cat, eq.produced || 0) + '</span>';
+      html += '</div>';
+    });
+    html += '</div></div>';
+  }
+
+  html += '</div>';
+  return html;
+}
+
+// ── MAIN TAB RENDERER ────────────────────────────────
+function renderDefenseCompaniesTab() {
+  const allFounded = DEFENSE_COMPANIES.filter(c => c.foundedBy !== null);
+  allFounded.forEach(c => initDefenseCompanyFinancials(c));
+
+  // Build ranked rows
+  const rows = allFounded.map(co => {
+    const foundingNation = Object.values(NATIONS).find(n => n.id === co.foundedBy) || null;
+    const totalPower = computeCompanyPowerProduced(co);
+    const isPublic = isPublicDefenseCompany(co, foundingNation);
+    const marketValue = getDefenseCompanyMarketValue(co);
+    const pnl = (co.totalRevenue || 0) - (co.totalResearchCost || 0);
+    return { co, foundingNation, totalPower, isPublic, marketValue, pnl };
+  }).sort((a, b) => b.marketValue - a.marketValue);
+
+  const totalRevAll   = allFounded.reduce((s, c) => s + (c.totalRevenue || 0), 0);
+  const totalSalesAll = allFounded.reduce((s, c) => s + (c.totalSales || 0), 0);
+  const publicCount   = rows.filter(r => r.isPublic).length;
+  const stamp = (typeof formatDate === 'function' && GAME?.date) ? formatDate(GAME.date) : 'Now';
+
+  let html = '<div class="tab-content" id="defco-tab-root">';
+
+  // ── Header bar ──
+  html += '<div class="section-card" style="padding:10px 12px;margin-bottom:10px;background:linear-gradient(135deg,rgba(9,28,54,0.9),rgba(16,43,79,0.9))">';
+  html += '<div style="font-size:13px;font-weight:700;color:var(--accent-blue)">🏭 Defense Companies Registry</div>';
+  html += '<div style="font-size:11px;color:var(--text-muted)">Turn ' + (GAME?.turn || 0) + ' • ' + stamp + ' • ' + allFounded.length + ' founded / ' + DEFENSE_COMPANIES.length + ' total</div>';
+  html += '<div style="margin-top:8px;display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:6px">';
+  html += '<div class="resource-item"><span class="r-name">Active Companies</span><span class="r-val">' + allFounded.length + '</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Public / Private</span><span class="r-val">' + publicCount + ' / ' + (allFounded.length - publicCount) + '</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Total Revenue</span><span class="r-val" style="color:var(--accent-green)">$' + totalRevAll.toFixed(1) + 'M</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Units Sold</span><span class="r-val">' + totalSalesAll.toLocaleString() + '</span></div>';
+  html += '</div></div>';
+
+  // ── Detail view (if selected) ──
+  if (DC_UI_STATE.selectedCompany) {
+    const co = allFounded.find(c => c.id === DC_UI_STATE.selectedCompany);
+    if (co) html += renderDefenseCompanyDetail(co);
+  }
+
+  // ── Rankings table ──
+  if (rows.length === 0) {
+    html += '<div class="section-card"><p class="empty">No defense companies have been founded yet. Found one in the Military tab.</p></div>';
+  } else {
+    html += '<div class="section-card"><h4>📊 Company Rankings — by Market Value</h4>';
+    html += '<div style="max-height:420px;overflow-y:auto">';
+    rows.forEach(({ co, foundingNation, isPublic, marketValue, pnl }, i) => {
+      const pnlColor = pnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+      const pnlSign  = pnl >= 0 ? '+' : '';
+      const era = getEraForTechLevel(co.techLevel || 1);
+      const isSel = DC_UI_STATE.selectedCompany === co.id;
+      const rowBg = isSel ? 'rgba(46,167,255,0.12)' : 'transparent';
+      const producedTotal = (co.equipment || []).reduce((sum, eq) => sum + Math.max(0, Number(eq.produced || 0)), 0);
+      const topOrder = Object.values(co.orderLedger || {}).sort((a, b) => Number(b.units || 0) - Number(a.units || 0))[0] || null;
+      const topOrderLabel = topOrder ? (topOrder.nationName + ' ' + Number(topOrder.units || 0).toLocaleString() + 'u') : 'No major orders yet';
+      html += '<button class="btn-sm" data-defco-id="' + co.id + '" style="width:100%;display:flex;gap:8px;align-items:center;padding:7px 6px;border:0;border-bottom:1px solid rgba(84,140,196,0.12);font-size:11px;text-align:left;background:' + rowBg + '">';
+      html += '<span style="color:var(--text-muted);min-width:22px">#' + (i + 1) + '</span>';
+      html += '<span style="flex:1"><b>' + co.name + '</b><br><span style="color:var(--text-muted)">' + co.desc + '</span><br><span style="color:var(--accent-green)">Manufactured: ' + Number(producedTotal).toLocaleString() + ' units</span><br><span style="color:var(--accent-blue)">Top Order: ' + topOrderLabel + '</span></span>';
+      html += '<span style="color:var(--text-muted);font-size:10px;text-align:right">' + (foundingNation ? foundingNation.flag + ' ' + foundingNation.name : (co.foundedBy || '?')) + '<br>' + (isPublic ? '📈 Public' : '🔒 Private') + '</span>';
+      html += '<span style="color:var(--accent-blue);font-size:10px;text-align:right">T' + co.tier + '<br>' + era.label.split(' ')[0] + '</span>';
+      html += '<span style="font-size:10px;text-align:right;min-width:60px"><span style="color:var(--accent-yellow)">$' + marketValue.toFixed(0) + 'M</span><br><span style="color:' + pnlColor + '">' + pnlSign + '$' + pnl.toFixed(0) + '</span></span>';
+      html += '</button>';
+    });
+    html += '</div>';
+
+    // ── Top movers section ──
+    const withHistory = rows.filter(r => (r.co.priceHistory || []).length >= 2);
+    if (withHistory.length > 0) {
+      html += '<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border-color)">';
+      html += '<div style="font-size:11px;font-weight:600;margin-bottom:4px;color:var(--text-secondary)">Recent Revenue Movers:</div>';
+      html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">';
+      const sorted = withHistory.sort((a, b) => {
+        const lastA = a.co.priceHistory[a.co.priceHistory.length - 1]?.revenue || 0;
+        const lastB = b.co.priceHistory[b.co.priceHistory.length - 1]?.revenue || 0;
+        return lastB - lastA;
+      });
+      sorted.slice(0, 4).forEach(({ co }) => {
+        const last = co.priceHistory[co.priceHistory.length - 1]?.revenue || 0;
+        const prev = co.priceHistory[co.priceHistory.length - 2]?.revenue || last;
+        const diff = last - prev;
+        const color = diff >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+        const arrow = diff >= 0 ? '📈' : '📉';
+        html += '<div style="font-size:11px;display:flex;justify-content:space-between;padding:2px 4px;background:rgba(9,28,54,0.4);border-radius:4px">';
+        html += '<span>' + arrow + ' ' + co.name.split(' ')[0] + '</span>';
+        html += '<span style="color:' + color + '">$' + last.toFixed(1) + 'M</span>';
+        html += '</div>';
+      });
+      html += '</div></div>';
+    }
+
+    html += '</div>'; // close rankings section-card
+  }
+
+  html += '</div>'; // close tab-content
+  return html;
+}
+
+// ── ATTACH INTERACTIONS ──────────────────────────────
+function attachDefenseCompaniesTabInteractions() {
+  const root = document.getElementById('defco-tab-root');
+  if (!root) return;
+  root.querySelectorAll('[data-defco-id]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-defco-id');
+      DC_UI_STATE.selectedCompany = id || null;
+      if (typeof renderTabContent === 'function') renderTabContent('defensecos');
+    });
+  });
+}
+
+window.renderDefenseCompaniesTab = renderDefenseCompaniesTab;
+window.attachDefenseCompaniesTabInteractions = attachDefenseCompaniesTabInteractions;
+window.getDefenseCompanyMarketValue = getDefenseCompanyMarketValue;
+window.isPublicDefenseCompany = isPublicDefenseCompany;
+window.initDefenseCompanyFinancials = initDefenseCompanyFinancials;
+window.computeCompanyPowerProduced = computeCompanyPowerProduced;
+window.processDefenseCompanyFoundings = processDefenseCompanyFoundings;
 

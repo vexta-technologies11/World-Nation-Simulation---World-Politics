@@ -52,6 +52,42 @@ const PRODUCT_ENGINE_CATALOG = [
     inputs: [{ type: 'product', id: 'steel', intensity: 0.28 }, { type: 'product', id: 'chips', intensity: 0.08 }],
   },
   {
+    id: 'gunpowder',
+    label: 'Gunpowder',
+    sector: 'manufacturing',
+    kind: 'material',
+    minTechTier: 1,
+    educationNeed: 24,
+    baseDemand: 0.82,
+    valueShare: 0.78,
+    researchWeight: 0.65,
+    inputs: [{ type: 'resource', id: 'minerals', intensity: 0.24 }, { type: 'resource', id: 'oil', intensity: 0.08 }],
+  },
+  {
+    id: 'explosives',
+    label: 'Explosives',
+    sector: 'manufacturing',
+    kind: 'material',
+    minTechTier: 2,
+    educationNeed: 36,
+    baseDemand: 0.86,
+    valueShare: 0.88,
+    researchWeight: 0.92,
+    inputs: [{ type: 'product', id: 'gunpowder', intensity: 0.32 }, { type: 'product', id: 'refined_fuel', intensity: 0.12 }],
+  },
+  {
+    id: 'armor_composites',
+    label: 'Armor Composites',
+    sector: 'manufacturing',
+    kind: 'material',
+    minTechTier: 3,
+    educationNeed: 44,
+    baseDemand: 0.72,
+    valueShare: 1.24,
+    researchWeight: 1.08,
+    inputs: [{ type: 'product', id: 'steel', intensity: 0.22 }, { type: 'product', id: 'industrial_machinery', intensity: 0.10 }, { type: 'resource', id: 'rareEarth', intensity: 0.10 }],
+  },
+  {
     id: 'refined_fuel',
     label: 'Refined Fuel',
     sector: 'energy',
@@ -98,6 +134,18 @@ const PRODUCT_ENGINE_CATALOG = [
     valueShare: 1.08,
     researchWeight: 1.10,
     inputs: [{ type: 'resource', id: 'rareEarth', intensity: 0.22 }, { type: 'resource', id: 'minerals', intensity: 0.18 }],
+  },
+  {
+    id: 'guidance_electronics',
+    label: 'Guidance Electronics',
+    sector: 'technology',
+    kind: 'industrial',
+    minTechTier: 4,
+    educationNeed: 62,
+    baseDemand: 0.80,
+    valueShare: 1.35,
+    researchWeight: 1.38,
+    inputs: [{ type: 'product', id: 'chips', intensity: 0.22 }, { type: 'product', id: 'battery_cells', intensity: 0.12 }, { type: 'resource', id: 'rareEarth', intensity: 0.16 }],
   },
   {
     id: 'smartphones',
@@ -156,7 +204,11 @@ const COMPANY_PRODUCT_NAMES = {
   battery_cells: ['Cell 1', 'Cell 2', 'Cell 3', 'Cell 4', 'Cell 5', 'Cell 6', 'Cell 7', 'Cell 8', 'Cell 9', 'Cell X'],
   power_systems: ['Grid 1', 'Grid 2', 'Grid 3', 'Grid 4', 'Grid 5', 'Grid 6', 'Grid 7', 'Grid 8', 'Grid 9', 'Grid X'],
   steel: ['Alloy 1', 'Alloy 2', 'Alloy 3', 'Alloy 4', 'Alloy 5', 'Alloy 6', 'Alloy 7', 'Alloy 8', 'Alloy 9', 'Alloy X'],
+  gunpowder: ['Propellant 1', 'Propellant 2', 'Propellant 3', 'Propellant 4', 'Propellant 5', 'Propellant 6', 'Propellant 7', 'Propellant 8', 'Propellant 9', 'Propellant X'],
+  explosives: ['Explosive 1', 'Explosive 2', 'Explosive 3', 'Explosive 4', 'Explosive 5', 'Explosive 6', 'Explosive 7', 'Explosive 8', 'Explosive 9', 'Explosive X'],
+  armor_composites: ['Composite 1', 'Composite 2', 'Composite 3', 'Composite 4', 'Composite 5', 'Composite 6', 'Composite 7', 'Composite 8', 'Composite 9', 'Composite X'],
   industrial_machinery: ['Machine 1', 'Machine 2', 'Machine 3', 'Machine 4', 'Machine 5', 'Machine 6', 'Machine 7', 'Machine 8', 'Machine 9', 'Machine X'],
+  guidance_electronics: ['Guidance 1', 'Guidance 2', 'Guidance 3', 'Guidance 4', 'Guidance 5', 'Guidance 6', 'Guidance 7', 'Guidance 8', 'Guidance 9', 'Guidance X'],
   packaged_food: ['Food Line 1', 'Food Line 2', 'Food Line 3', 'Food Line 4', 'Food Line 5', 'Food Line 6', 'Food Line 7', 'Food Line 8', 'Food Line 9', 'Food Line X'],
   fertilizer: ['Agri Mix 1', 'Agri Mix 2', 'Agri Mix 3', 'Agri Mix 4', 'Agri Mix 5', 'Agri Mix 6', 'Agri Mix 7', 'Agri Mix 8', 'Agri Mix 9', 'Agri Mix X'],
   refined_fuel: ['Fuel Blend 1', 'Fuel Blend 2', 'Fuel Blend 3', 'Fuel Blend 4', 'Fuel Blend 5', 'Fuel Blend 6', 'Fuel Blend 7', 'Fuel Blend 8', 'Fuel Blend 9', 'Fuel Blend X'],
@@ -237,6 +289,8 @@ function chooseCompanyProductLines(nation, company) {
       progress: 0,
       monthlyDemand: 0,
       monthlySupply: 0,
+      availableUnits: 0,
+      lifetimeProduced: 0,
       demandServed: 0,
       inputCoverage: 1,
       competitionScore: 1,
@@ -430,6 +484,8 @@ function processCompanyProductEngine(nation) {
 
       line.monthlyDemand = lineRevenueBase * demandPulse;
       line.monthlySupply = realizedRevenue;
+      line.availableUnits = Math.max(0, Number(line.availableUnits || 0) * 0.45 + Number(line.monthlySupply || 0));
+      line.lifetimeProduced = Math.max(0, Number(line.lifetimeProduced || 0) + Number(line.monthlySupply || 0));
       line.demandServed = clamp(realizedRevenue / Math.max(0.1, line.monthlyDemand), 0.05, 1.2);
       line.inputCoverage = inputResult.coverage;
       line.competitionScore = competition.share;
@@ -476,6 +532,182 @@ function processCompanyProductEngine(nation) {
       company.marketCap = Math.max(0.01, Number(company.stockPrice || 0.1) * shares / 1_000_000);
     }
   });
+}
+
+function getProductMarketUnitPrice(productId) {
+  const def = getProductDef(productId);
+  if (!def) return 0.35;
+  const weight = Number(def.valueShare || 1);
+  const kindPremium = def.kind === 'material' ? 0.82 : (def.kind === 'industrial' ? 1.08 : 1.2);
+  return Math.max(0.2, weight * kindPremium);
+}
+
+function consumeSupplierProductUnits(supplierCompany, productId, requestedUnits) {
+  const line = (supplierCompany?.productLines || []).find(item => item.productId === productId);
+  if (!line) return 0;
+  let available = Math.max(0, Number(line.availableUnits || 0));
+  if (available <= 0 && Number(line.monthlySupply || 0) > 0) {
+    available = Math.max(0, Number(line.monthlySupply || 0) * 0.35);
+    line.availableUnits = available;
+  }
+  if (available <= 0) return 0;
+  const take = Math.min(available, Math.max(0, Number(requestedUnits || 0)));
+  line.availableUnits = Math.max(0, available - take);
+  return take;
+}
+
+function acquireProductUnitsForDefense(nation, defenseCompany, productId, requiredUnits) {
+  let remaining = Math.max(0, Number(requiredUnits || 0));
+  let acquired = 0;
+  let totalCost = 0;
+  const procurement = [];
+  if (remaining <= 0) return { acquired, totalCost, procurement };
+
+  const localSuppliers = (nation?.companies || [])
+    .filter(company => company && company.id !== defenseCompany?.id)
+    .map(company => ({ company, local: true }))
+    .filter(entry => (entry.company.productLines || []).some(line => line.productId === productId && Number(line.availableUnits || 0) > 0))
+    .sort((a, b) => {
+      const aLine = (a.company.productLines || []).find(line => line.productId === productId);
+      const bLine = (b.company.productLines || []).find(line => line.productId === productId);
+      return Number(bLine?.availableUnits || 0) - Number(aLine?.availableUnits || 0);
+    });
+
+  const globalSuppliers = [];
+  Object.values(NATIONS || {}).forEach(otherNation => {
+    if (!otherNation || otherNation.failedState || otherNation.id === nation.id) return;
+    (otherNation.companies || []).forEach(company => {
+      if (!company) return;
+      const line = (company.productLines || []).find(item => item.productId === productId);
+      if (!line || Number(line.availableUnits || 0) <= 0) return;
+      globalSuppliers.push({ nation: otherNation, company, local: false });
+    });
+  });
+  globalSuppliers.sort((a, b) => {
+    const aLine = (a.company.productLines || []).find(line => line.productId === productId);
+    const bLine = (b.company.productLines || []).find(line => line.productId === productId);
+    return Number(bLine?.availableUnits || 0) - Number(aLine?.availableUnits || 0);
+  });
+
+  const chain = localSuppliers.concat(globalSuppliers);
+  const baseUnitPrice = getProductMarketUnitPrice(productId);
+  for (const entry of chain) {
+    if (remaining <= 0) break;
+    const taken = consumeSupplierProductUnits(entry.company, productId, remaining);
+    if (taken <= 0) continue;
+    const unitPrice = baseUnitPrice * (entry.local ? 1.0 : 1.18);
+    const cost = taken * unitPrice;
+    totalCost += cost;
+    acquired += taken;
+    remaining -= taken;
+    procurement.push({
+      type: 'product',
+      id: productId,
+      from: entry.local
+        ? ((nation.flag || '🏳️') + ' ' + (typeof getCompanyDisplayName === 'function' ? getCompanyDisplayName(entry.company) : (entry.company.name || 'Local Supplier')))
+        : ((entry.nation.flag || '🏳️') + ' ' + (typeof getCompanyDisplayName === 'function' ? getCompanyDisplayName(entry.company) : (entry.company.name || 'Foreign Supplier'))),
+      units: taken,
+      unitPrice,
+      cost,
+    });
+  }
+
+  return { acquired, totalCost, procurement };
+}
+
+function getResourceTypeDef(resourceId) {
+  if (!Array.isArray(RESOURCE_TYPES)) return null;
+  return RESOURCE_TYPES.find(item => item.id === resourceId) || null;
+}
+
+function acquireResourceUnitsForDefense(nation, resourceId, requiredUnits) {
+  let remaining = Math.max(0, Number(requiredUnits || 0));
+  let acquired = 0;
+  let totalCost = 0;
+  const procurement = [];
+  if (remaining <= 0) return { acquired, totalCost, procurement };
+
+  const localRes = nation?.resourceData?.[resourceId];
+  if (localRes) {
+    const localCapacity = Math.max(0, Number(localRes.level || 0) * 40);
+    const localTake = Math.min(localCapacity, remaining);
+    if (localTake > 0) {
+      localRes.level = Math.max(0, Number(localRes.level || 0) - localTake / 120);
+      localRes.consumed = Number(localRes.consumed || 0) + localTake * 0.01;
+      const unitPrice = Math.max(0.12, Number(getResourceTypeDef(resourceId)?.basePrice || 0.6) * 0.85);
+      const cost = localTake * unitPrice;
+      totalCost += cost;
+      acquired += localTake;
+      remaining -= localTake;
+      procurement.push({ type: 'resource', id: resourceId, from: (nation.flag || '🏳️') + ' ' + (nation.name || 'Domestic'), units: localTake, unitPrice, cost });
+    }
+  }
+
+  if (remaining > 0) {
+    const suppliers = getGlobalResourceSuppliers(resourceId, nation?.id);
+    for (const supplier of suppliers) {
+      if (remaining <= 0) break;
+      const res = supplier?.nation?.resourceData?.[resourceId];
+      if (!res) continue;
+      const exportCapacity = Math.max(0, (Number(res.level || 0) - 35) * 30);
+      if (exportCapacity <= 0) continue;
+      const take = Math.min(exportCapacity, remaining);
+      if (take <= 0) continue;
+      res.level = Math.max(0, Number(res.level || 0) - take / 150);
+      res.consumed = Number(res.consumed || 0) + take * 0.006;
+      const unitPrice = Math.max(0.18, Number(getResourceTypeDef(resourceId)?.basePrice || 0.8) * 1.2);
+      const cost = take * unitPrice;
+      totalCost += cost;
+      acquired += take;
+      remaining -= take;
+      procurement.push({ type: 'resource', id: resourceId, from: (supplier.nation.flag || '🏳️') + ' ' + (supplier.nation.name || 'Resource Exporter'), units: take, unitPrice, cost });
+    }
+  }
+
+  return { acquired, totalCost, procurement };
+}
+
+function acquireDefenseInputMaterials(nation, defenseCompany, request) {
+  const products = request?.products || {};
+  const resources = request?.resources || {};
+  const shortage = [];
+  const procurement = [];
+  let totalCost = 0;
+  let requiredTotal = 0;
+  let acquiredTotal = 0;
+
+  Object.entries(products).forEach(([productId, units]) => {
+    const needed = Math.max(0, Number(units || 0));
+    if (needed <= 0) return;
+    requiredTotal += needed;
+    const result = acquireProductUnitsForDefense(nation, defenseCompany, productId, needed);
+    acquiredTotal += result.acquired;
+    totalCost += result.totalCost;
+    procurement.push(...result.procurement);
+    if (result.acquired < needed) {
+      shortage.push({ type: 'product', id: productId, needed, acquired: result.acquired, missing: needed - result.acquired });
+    }
+  });
+
+  Object.entries(resources).forEach(([resourceId, units]) => {
+    const needed = Math.max(0, Number(units || 0));
+    if (needed <= 0) return;
+    requiredTotal += needed;
+    const result = acquireResourceUnitsForDefense(nation, resourceId, needed);
+    acquiredTotal += result.acquired;
+    totalCost += result.totalCost;
+    procurement.push(...result.procurement);
+    if (result.acquired < needed) {
+      shortage.push({ type: 'resource', id: resourceId, needed, acquired: result.acquired, missing: needed - result.acquired });
+    }
+  });
+
+  return {
+    coverage: requiredTotal <= 0 ? 1 : clamp(acquiredTotal / requiredTotal, 0, 1),
+    totalCost,
+    shortage,
+    procurement,
+  };
 }
 
 function getCompanyCompetitionSnapshot(nation, company) {
@@ -537,3 +769,4 @@ window.PRODUCT_ENGINE_CATALOG = PRODUCT_ENGINE_CATALOG;
 window.getProductDef = getProductDef;
 window.processCompanyProductEngine = processCompanyProductEngine;
 window.getCompanyCompetitionSnapshot = getCompanyCompetitionSnapshot;
+window.acquireDefenseInputMaterials = acquireDefenseInputMaterials;

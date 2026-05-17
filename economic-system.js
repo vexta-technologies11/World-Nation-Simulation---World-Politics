@@ -1536,8 +1536,9 @@ function updateNationCompanies(nation) {
       buyer.employees = clamp(Math.round(Number(buyer.employees || 0) + Number(target.employees || 0) * 0.72), 1, 250000);
       
       // R&D spillover: acquire target's tech progress
+      let spillover = 0;
       if (Number(target.techProgress || 0) > 0) {
-        const spillover = Math.max(0, Number(target.techProgress || 0) * 0.35);
+        spillover = Math.max(0, Number(target.techProgress || 0) * 0.35);
         buyer.techProgress = Number(buyer.techProgress || 0) + spillover;
       }
       
@@ -1948,6 +1949,115 @@ function renderGlobalStockMarketBoard(limit = 12) {
   html += losers.map(r => '<button class="btn-sm" data-econ-brand="' + r.key + '" style="width:100%;display:flex;justify-content:space-between;padding:4px 6px;border:0;border-bottom:1px solid rgba(84,140,196,0.12);font-size:11px;text-align:left;background:transparent"><span>📉 ' + r.name + '</span><span style="color:var(--accent-red)">' + r.avgMove.toFixed(2) + '%</span></button>').join('');
   html += '</div></div>';
   html += '</div></div>';
+
+  // ── DEFENSE COMPANIES MARKET SECTION ─────────────
+  html += renderDefenseCompanyMarketBlock();
+
+  return html;
+}
+
+// Build the defense companies block for the Global Company Market
+function renderDefenseCompanyMarketBlock() {
+  if (typeof DEFENSE_COMPANIES === 'undefined') return '';
+
+  const founded = DEFENSE_COMPANIES.filter(c => c.foundedBy !== null);
+  if (founded.length === 0) return '';
+
+  // Init financials for any company that lacks them
+  if (typeof initDefenseCompanyFinancials === 'function') {
+    founded.forEach(c => initDefenseCompanyFinancials(c));
+  }
+
+  // Separate public vs private
+  const publicCos  = founded.filter(c => {
+    const n = Object.values(NATIONS).find(na => na.id === c.foundedBy);
+    return typeof isPublicDefenseCompany === 'function' ? isPublicDefenseCompany(c, n) : false;
+  });
+  const privateCos = founded.filter(c => !publicCos.includes(c));
+
+  // Sort by market value
+  const byValue = (a, b) => {
+    const va = typeof getDefenseCompanyMarketValue === 'function' ? getDefenseCompanyMarketValue(a) : 0;
+    const vb = typeof getDefenseCompanyMarketValue === 'function' ? getDefenseCompanyMarketValue(b) : 0;
+    return vb - va;
+  };
+  const topPublic  = [...publicCos].sort(byValue).slice(0, 6);
+  const topPrivate = [...privateCos].sort(byValue).slice(0, 4);
+
+  // Top movers/losers by last revenue entry
+  const withHistory = founded.filter(c => (c.priceHistory || []).length >= 2);
+  const movers = withHistory.map(c => {
+    const last = c.priceHistory[c.priceHistory.length - 1]?.revenue || 0;
+    const prev = c.priceHistory[c.priceHistory.length - 2]?.revenue || last;
+    return { c, delta: last - prev };
+  }).sort((a, b) => b.delta - a.delta);
+  const gainers = movers.filter(m => m.delta > 0).slice(0, 3);
+  const losers  = movers.filter(m => m.delta < 0).slice(-3).reverse();
+
+  const totalDefCap = founded.reduce((s, c) =>
+    s + (typeof getDefenseCompanyMarketValue === 'function' ? getDefenseCompanyMarketValue(c) : 0), 0);
+
+  let html = '<div class="section-card" style="margin-top:10px"><h4>🏭 Defense Industry Market</h4>';
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:6px;margin-bottom:8px">';
+  html += '<div class="resource-item"><span class="r-name">Active Companies</span><span class="r-val">' + founded.length + '</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Public Listed</span><span class="r-val">' + publicCos.length + '</span></div>';
+  html += '<div class="resource-item"><span class="r-name">State-Owned</span><span class="r-val">' + privateCos.length + '</span></div>';
+  html += '<div class="resource-item"><span class="r-name">Defense Market Cap</span><span class="r-val" style="color:var(--accent-yellow)">$' + totalDefCap.toFixed(0) + 'M</span></div>';
+  html += '</div>';
+
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:8px">';
+
+  // Public listings
+  if (topPublic.length > 0) {
+    html += '<div><h5 style="margin:2px 0 6px 0">📈 Public Listed</h5><div style="max-height:200px;overflow-y:auto">';
+    topPublic.forEach((co, i) => {
+      const n = Object.values(NATIONS).find(na => na.id === co.foundedBy);
+      const val = typeof getDefenseCompanyMarketValue === 'function' ? getDefenseCompanyMarketValue(co) : 0;
+      const pnl = (co.totalRevenue || 0) - (co.totalResearchCost || 0);
+      html += '<button class="btn-sm" onclick="if(typeof openTab===\'function\') openTab(\'defensecos\')" style="width:100%;display:flex;gap:6px;align-items:center;padding:5px 6px;border:0;border-bottom:1px solid rgba(84,140,196,0.12);font-size:11px;text-align:left;background:transparent">';
+      html += '<span style="color:var(--text-muted);width:18px">#' + (i+1) + '</span>';
+      html += '<span style="flex:1">' + co.name + ' <span style="color:var(--text-muted)">(' + (n ? n.flag + n.name : co.foundedBy) + ')</span></span>';
+      html += '<span style="color:var(--accent-yellow)">$' + val.toFixed(0) + 'M</span>';
+      html += '<span style="color:' + (pnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)') + ';font-size:10px">' + (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(0) + '</span>';
+      html += '</button>';
+    });
+    html += '</div></div>';
+  }
+
+  // State-owned companies
+  if (topPrivate.length > 0) {
+    html += '<div><h5 style="margin:2px 0 6px 0">🔒 State-Owned</h5><div style="max-height:200px;overflow-y:auto">';
+    topPrivate.forEach((co, i) => {
+      const n = Object.values(NATIONS).find(na => na.id === co.foundedBy);
+      const val = typeof getDefenseCompanyMarketValue === 'function' ? getDefenseCompanyMarketValue(co) : 0;
+      html += '<div style="display:flex;gap:6px;align-items:center;padding:5px 6px;border-bottom:1px solid rgba(84,140,196,0.12);font-size:11px">';
+      html += '<span style="color:var(--text-muted);width:18px">#' + (i+1) + '</span>';
+      html += '<span style="flex:1">' + co.name + ' <span style="color:var(--text-muted)">(' + (n ? n.flag + n.name : co.foundedBy) + ')</span></span>';
+      html += '<span style="color:var(--accent-blue)">$' + val.toFixed(0) + 'M</span>';
+      html += '</div>';
+    });
+    html += '</div></div>';
+  }
+
+  // Movers/losers
+  if (gainers.length > 0 || losers.length > 0) {
+    html += '<div><h5 style="margin:2px 0 6px 0">Defense Movers</h5><div style="max-height:200px;overflow-y:auto">';
+    gainers.forEach(({ c, delta }) => {
+      html += '<div style="display:flex;justify-content:space-between;padding:4px 6px;border-bottom:1px solid rgba(84,140,196,0.12);font-size:11px">';
+      html += '<span>📈 ' + c.name.split(' ')[0] + '</span><span style="color:var(--accent-green)">+$' + delta.toFixed(1) + 'M</span>';
+      html += '</div>';
+    });
+    losers.forEach(({ c, delta }) => {
+      html += '<div style="display:flex;justify-content:space-between;padding:4px 6px;border-bottom:1px solid rgba(84,140,196,0.12);font-size:11px">';
+      html += '<span>📉 ' + c.name.split(' ')[0] + '</span><span style="color:var(--accent-red)">-$' + Math.abs(delta).toFixed(1) + 'M</span>';
+      html += '</div>';
+    });
+    html += '</div></div>';
+  }
+
+  html += '</div>'; // grid
+  html += '<div style="margin-top:6px;font-size:10px;color:var(--text-muted)">Public companies can participate in the global stock market. State-owned companies are controlled by their founding government. View full rankings in the <button class="btn-sm" onclick="if(typeof openTab===\'function\') openTab(\'defensecos\')" style="font-size:10px;padding:1px 6px">🏭 DefCo tab</button>.</div>';
+  html += '</div>';
   return html;
 }
 

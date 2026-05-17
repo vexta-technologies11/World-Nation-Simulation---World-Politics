@@ -13,9 +13,9 @@ const GAME = {
   timer: null,
   turnInProgress: false,
   timerGeneration: 0,
-  date: new Date(2025, 5, 1), // June 2025
+  date: new Date(1910, 0, 1), // January 1910 — simulation start
 
-  treasury: 150000, // in millions ($150B starting reserve)
+  treasury: 8000,   // in millions — 1910-era reserve
   approval: 58,
   threatLevel: 'Low',
 
@@ -29,53 +29,53 @@ const GAME = {
     social: 10,
   },
 
-  // Player nation
+  // Player nation — 1910 era starting values
   playerNation: {
     id: 'player',
     name: 'United States',
-    flag: '🇺🇸',
-    leader: 'James Holloway',
-    leaderTraits: ['Pragmatist', 'Economist'],
-    leaderTerm: '2025–2029',
-    gdp: 25.0,
-    population: 331,
-    militaryPower: 78,
-    techLevel: 5.5,
-    education: 50,
-    governance: 50,
-    infrastructure: 50,
-    resources: 50,
-    health: 50,
-    environment: 50,
-    energySecurity: 50,
-    renewableShare: 35,
-    stability: 55,
-    inequality: 50,
-    inflation: 4.0,
-    debtRatio: 60,
-    migrationPressure: 40,
-    innovationRisk: 15,
-    factories: 48,
-    jobs: 62,
-    religionInfluence: 55,
-    atrocityRisk: 5,
+    flag: '\u{1F1FA}\u{1F1F8}',
+    leader: 'Theodore Marshall',
+    leaderTraits: ['Pragmatist', 'Industrialist'],
+    leaderTerm: '1909\u20131913',
+    gdp: 1.4,
+    population: 92,
+    militaryPower: 28,
+    techLevel: 1.8,
+    education: 32,
+    governance: 42,
+    infrastructure: 28,
+    resources: 55,
+    health: 28,
+    environment: 62,
+    energySecurity: 35,
+    renewableShare: 0,
+    stability: 52,
+    inequality: 60,
+    inflation: 2.5,
+    debtRatio: 30,
+    migrationPressure: 30,
+    innovationRisk: 25,
+    factories: 22,
+    jobs: 38,
+    religionInfluence: 65,
+    atrocityRisk: 8,
     governmentStyle: 'federal_republic',
     leaderType: 'Elected President',
     policyDoctrine: 'education-first',
     decisionQuality: 72,
     aiBudget: {
-      military: 22,
-      economy: 28,
+      military: 28,
+      economy: 26,
       diplomacy: 14,
-      intelligence: 10,
-      space: 10,
+      intelligence: 12,
+      space: 4,
       social: 16,
     },
-    happiness: 50,
-    resilience: 50,
+    happiness: 42,
+    resilience: 45,
   },
 
-  selectedNation: null, // for viewing other nations
+  selectedNation: null,
   historyByNation: {},
   historyView: { countryId: null, metric: 'gdp' },
   leaderboardMetric: 'resources',
@@ -90,46 +90,48 @@ const GAME = {
 // ============================================================
 // NATIONS DATA
 // ============================================================
+// 1910 ERA STARTING VALUES — nations begin with pre-industrial baselines.
+// buildNations() adds seeded variation so each country diverges from turn 1.
 const STARTING_NATION = {
   leader: 'National Council',
   traits: ['Pragmatist', 'Stabilizer'],
-  gdp: 4.0,
-  population: 75,
-  militaryPower: 50,
-  techLevel: 5.0,
-  education: 50,
-  governance: 50,
-  infrastructure: 50,
-  resources: 50,
-  health: 50,
-  environment: 50,
-  energySecurity: 50,
-  renewableShare: 35,
-  stability: 55,
-  inequality: 50,
-  inflation: 4.0,
-  debtRatio: 60,
-  migrationPressure: 40,
-  innovationRisk: 15,
-  factories: 48,
-  jobs: 62,
-  religionInfluence: 55,
-  atrocityRisk: 5,
-  stockMarket: 100,
-  corruption: 35,
-  deficit: 3.0,
+  gdp: 0.28,
+  population: 22,
+  militaryPower: 12,
+  techLevel: 1.0,
+  education: 18,
+  governance: 30,
+  infrastructure: 15,
+  resources: 35,
+  health: 22,
+  environment: 65,
+  energySecurity: 20,
+  renewableShare: 0,
+  stability: 45,
+  inequality: 62,
+  inflation: 2.0,
+  debtRatio: 25,
+  migrationPressure: 22,
+  innovationRisk: 40,
+  factories: 8,
+  jobs: 30,
+  religionInfluence: 72,
+  atrocityRisk: 12,
+  stockMarket: 20,
+  corruption: 58,
+  deficit: 1.5,
   recessionMonths: 0,
   inCrisis: false,
-  crisisRisk: 25,
+  crisisRisk: 35,
   failedState: false,
   governmentStyle: 'federal_republic',
   leaderType: 'Elected President',
   policyDoctrine: 'balanced',
-  decisionQuality: 60,
+  decisionQuality: 45,
   leaderTenureMonths: 0,
   lastLeaderChangeTurn: -120,
-  happiness: 50,
-  resilience: 50,
+  happiness: 35,
+  resilience: 38,
   relation: { base: 0, trend: 0 },
 };
 
@@ -197,51 +199,7 @@ const GOVERNMENT_MODELS = {
     crisisVulnerability: 0.9,
     oustSensitivity: 0.9,
   },
-  socialist_republic: {
-    name: 'Socialist Republic',
-    econBoost: 0.99,
-    innovationBoost: 0.97,
-    stabilityBoost: 1.06,
-    corruptionControl: 0.95,
-    crisisVulnerability: 1.02,
-    oustSensitivity: 1.0,
-  },
-  theocratic_state: {
-    name: 'Theocratic State',
-    econBoost: 0.9,
-    innovationBoost: 0.82,
-    stabilityBoost: 0.98,
-    corruptionControl: 0.85,
-    crisisVulnerability: 1.2,
-    oustSensitivity: 0.7,
-  },
 };
-
-const LEADER_ARCHETYPES = {
-  'Elected President': { traits: ['Pragmatist', 'Consensus Builder'], decisionBoost: 10 },
-  'Prime Minister': { traits: ['Institutionalist', 'Negotiator'], decisionBoost: 8 },
-  'Supreme Leader': { traits: ['Hardliner', 'Propagandist'], decisionBoost: -8 },
-  'Monarch': { traits: ['Traditionalist', 'Symbolic Authority'], decisionBoost: -2 },
-  'General': { traits: ['Militarist', 'Disciplinarian'], decisionBoost: -4 },
-  'Economist': { traits: ['Fiscal Hawk', 'Reformer'], decisionBoost: 12 },
-  'Technocrat': { traits: ['Data Driven', 'Planner'], decisionBoost: 14 },
-  'Populist': { traits: ['Charismatic', 'Volatile'], decisionBoost: -6 },
-  'Diplomat': { traits: ['Mediator', 'Coalition Builder'], decisionBoost: 9 },
-  'Industrialist': { traits: ['Growth Focused', 'Risk Taker'], decisionBoost: 5 },
-};
-
-const POLICY_DOCTRINES = [
-  'balanced',
-  'militarized',
-  'education-first',
-  'industrial-expansion',
-  'resource-extraction',
-  'diplomatic-network',
-  'security-state',
-  'welfare-state',
-  'innovation-drive',
-  'austerity-stabilization',
-];
 
 const DOCTRINE_LABELS = {
   balanced: 'Balanced',
@@ -254,6 +212,35 @@ const DOCTRINE_LABELS = {
   'welfare-state': 'Welfare State',
   'innovation-drive': 'Innovation Drive',
   'austerity-stabilization': 'Austerity Stabilization',
+};
+
+const POLICY_DOCTRINES = Object.keys(DOCTRINE_LABELS);
+
+const LEADER_ARCHETYPES = {
+  'Elected President': {
+    traits: ['Reformer', 'Diplomat'],
+    decisionBoost: 12,
+  },
+  'Prime Minister': {
+    traits: ['Pragmatist', 'Stabilizer'],
+    decisionBoost: 10,
+  },
+  Chancellor: {
+    traits: ['Technocrat', 'Planner'],
+    decisionBoost: 11,
+  },
+  Monarch: {
+    traits: ['Traditionalist', 'Symbolic'],
+    decisionBoost: 6,
+  },
+  'General Secretary': {
+    traits: ['Ideologue', 'Organizer'],
+    decisionBoost: 8,
+  },
+  'Supreme Leader': {
+    traits: ['Authoritarian', 'Survivor'],
+    decisionBoost: 7,
+  },
 };
 
 const LEADER_FIRST_NAMES = [
@@ -435,6 +422,21 @@ function buildNations() {
     const aiBudget = doctrineBaseBudget(policyDoctrine);
     const decisionQuality = clamp(48 + leader.decisionBonus + seededRandom01(`${iso2}-iq`) * 26, 15, 95);
 
+    // ── 1910-era seeded variation ─────────────────────────────────────────
+    const _sv = k => seededRandom01(`${iso2}-1910-${k}`);
+    const _era_gdp   = STARTING_NATION.gdp    * (0.5 + _sv('gdp')   * 2.8);
+    const _era_edu   = clamp(STARTING_NATION.education    + (_sv('edu')   - 0.3) * 28, 8,  50);
+    const _era_tech  = clamp(STARTING_NATION.techLevel    + _sv('tech')  * 1.4,        1.0, 2.5);
+    const _era_mil   = clamp(STARTING_NATION.militaryPower + (_sv('mil')  - 0.2) * 30,  5,  50);
+    const _era_gov   = clamp(STARTING_NATION.governance   + (_sv('gov')  - 0.3) * 30,  10, 60);
+    const _era_infra = clamp(STARTING_NATION.infrastructure + (_sv('infra') - 0.2) * 25, 5, 45);
+    const _era_res   = clamp(STARTING_NATION.resources    + (_sv('res')  - 0.3) * 40,  10, 80);
+    const _era_pop   = clamp(STARTING_NATION.population   * (0.3 + _sv('pop')  * 3.5),  2, 200);
+    const _era_corr  = clamp(STARTING_NATION.corruption   + (_sv('corr') - 0.3) * 25,  30, 90);
+    const _era_stab  = clamp(STARTING_NATION.stability    + (_sv('stab') - 0.4) * 30,  15, 72);
+    const _era_ineq  = clamp(STARTING_NATION.inequality   + (_sv('ineq') - 0.3) * 22,  35, 90);
+    const _era_fact  = clamp(STARTING_NATION.factories    + Math.round(_sv('fact') * 20), 2, 35);
+
     nations[id] = {
       id,
       iso2,
@@ -442,25 +444,25 @@ function buildNations() {
       flag: isoToFlag(iso2),
       leader: leader.name,
       traits: [...leader.traits],
-      gdp: STARTING_NATION.gdp,
-      population: STARTING_NATION.population,
-      militaryPower: STARTING_NATION.militaryPower,
-      techLevel: STARTING_NATION.techLevel,
-      education: STARTING_NATION.education,
-      governance: STARTING_NATION.governance,
-      infrastructure: STARTING_NATION.infrastructure,
-      resources: STARTING_NATION.resources,
+      gdp: _era_gdp,
+      population: _era_pop,
+      militaryPower: _era_mil,
+      techLevel: _era_tech,
+      education: _era_edu,
+      governance: _era_gov,
+      infrastructure: _era_infra,
+      resources: _era_res,
       health: STARTING_NATION.health,
       environment: STARTING_NATION.environment,
       energySecurity: STARTING_NATION.energySecurity,
       renewableShare: STARTING_NATION.renewableShare,
-      stability: STARTING_NATION.stability,
-      inequality: STARTING_NATION.inequality,
+      stability: _era_stab,
+      inequality: _era_ineq,
       inflation: STARTING_NATION.inflation,
       debtRatio: STARTING_NATION.debtRatio,
       migrationPressure: STARTING_NATION.migrationPressure,
       innovationRisk: STARTING_NATION.innovationRisk,
-      factories: STARTING_NATION.factories,
+      factories: _era_fact,
       jobs: STARTING_NATION.jobs,
       religionInfluence: STARTING_NATION.religionInfluence,
       atrocityRisk: STARTING_NATION.atrocityRisk,
@@ -494,15 +496,15 @@ const NATIONS = buildNations();
 const PLAYER_ID = Object.keys(NATIONS).find(id => NATIONS[id].iso2 === PLAYER_ISO2) || Object.keys(NATIONS)[0];
 
 GAME.playerNation = Object.assign({}, GAME.playerNation, NATIONS[PLAYER_ID], {
-  leader: 'James Holloway',
+  leader: 'Theodore Marshall',
   leaderType: 'Elected President',
   governmentStyle: 'federal_republic',
   policyDoctrine: 'education-first',
   decisionQuality: 78,
   aiBudget: doctrineBaseBudget('education-first'),
-  leaderTraits: ['Pragmatist', 'Economist'],
-  traits: ['Pragmatist', 'Economist'],
-  leaderTerm: '2025-2029'
+  leaderTraits: ['Pragmatist', 'Industrialist'],
+  traits: ['Pragmatist', 'Industrialist'],
+  leaderTerm: '1909-1913'
 });
 window.NATIONS = NATIONS;
 window.GAME = GAME;
@@ -680,6 +682,194 @@ function formatHumanTrillions(valueT, decimals = 2) {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function normalizeShareMap(shares) {
+  const entries = Object.entries(shares).map(([key, value]) => [key, Math.max(0, Number(value) || 0)]);
+  const total = entries.reduce((sum, [, value]) => sum + value, 0);
+  if (total <= 0) {
+    const even = 100 / Math.max(entries.length, 1);
+    entries.forEach(([key]) => { shares[key] = even; });
+    return shares;
+  }
+  entries.forEach(([key, value]) => {
+    shares[key] = (value / total) * 100;
+  });
+  return shares;
+}
+
+function getEducationLevelShares(nation) {
+  const es = nation && nation.eduState ? nation.eduState : null;
+  if (es) {
+    const tertiary = clamp(es.highSkillPct || 0, 0, 60);
+    const secondary = clamp((es.skilledLaborPct || 0) - tertiary, 0, 85);
+    const primary = clamp((es.literacyRate || 0) - (es.skilledLaborPct || 0), 0, 95);
+    const belowPrimary = clamp(100 - (es.literacyRate || 0), 0, 100);
+    return normalizeShareMap({
+      belowPrimary,
+      primary,
+      secondary,
+      tertiary,
+    });
+  }
+
+  const edu = clamp(Number(nation?.education) || 50, 1, 100);
+  const tertiary = clamp((edu - 45) * 0.45, 1, 24);
+  const secondary = clamp(edu * 0.42 - tertiary * 0.35, 8, 48);
+  const primary = clamp(edu * 0.34 - tertiary * 0.1, 18, 55);
+  const belowPrimary = clamp(100 - tertiary - secondary - primary, 4, 55);
+  return normalizeShareMap({
+    belowPrimary,
+    primary,
+    secondary,
+    tertiary,
+  });
+}
+
+function initNationDemographics(nation) {
+  if (!nation || nation.demographics) return;
+
+  const baseYouth = clamp(
+    25 + (Number(nation.religionInfluence || 50) - 50) * 0.12 - (Number(nation.education || 50) - 50) * 0.08,
+    16,
+    40
+  );
+  const baseElderly = clamp(
+    9 + (Number(nation.health || 50) - 50) * 0.10 + (Number(nation.education || 50) - 50) * 0.04,
+    4,
+    24
+  );
+  const ageShares = normalizeShareMap({
+    youthPct: baseYouth,
+    workingAgePct: Math.max(38, 100 - baseYouth - baseElderly),
+    elderlyPct: baseElderly,
+  });
+  const eduShares = getEducationLevelShares(nation);
+
+  nation.demographics = {
+    youthPct: ageShares.youthPct,
+    workingAgePct: ageShares.workingAgePct,
+    elderlyPct: ageShares.elderlyPct,
+    belowPrimaryPct: eduShares.belowPrimary,
+    primaryOnlyPct: eduShares.primary,
+    secondaryPct: eduShares.secondary,
+    tertiaryPct: eduShares.tertiary,
+    recruitablePct: 0,
+    recruitablePoolM: 0,
+    supportPersonnelPoolM: 0,
+    annualPopulationChangePct: 0,
+  };
+}
+
+function updateNationDemographics(nation, nationId, previousPopulation) {
+  if (!nation) return null;
+  initNationDemographics(nation);
+
+  const demographics = nation.demographics;
+  const warPressure = typeof getWarPressure === 'function' ? getWarPressure(nationId || nation.id) : 0;
+  const health = clamp(Number(nation.health) || 50, 1, 100);
+  const education = clamp(Number(nation.education) || 50, 1, 100);
+  const religion = clamp(Number(nation.religionInfluence) || 50, 1, 100);
+  const stability = clamp(Number(nation.stability) || 50, 1, 100);
+  const jobs = clamp(Number(nation.jobs) || 50, 1, 100);
+  const migration = clamp(Number(nation.migrationPressure) || 50, 1, 100);
+
+  const targetYouth = clamp(24 + (religion - 50) * 0.10 - (education - 50) * 0.10 - warPressure * 1.4, 14, 40);
+  const targetElderly = clamp(10 + (health - 50) * 0.12 + (education - 50) * 0.05 - warPressure * 1.6 - migration * 0.02, 3, 28);
+  const targetWorking = Math.max(35, 100 - targetYouth - targetElderly);
+  const ageShares = normalizeShareMap({
+    youthPct: demographics.youthPct + (targetYouth - demographics.youthPct) * 0.08,
+    workingAgePct: demographics.workingAgePct + (targetWorking - demographics.workingAgePct) * 0.08,
+    elderlyPct: demographics.elderlyPct + (targetElderly - demographics.elderlyPct) * 0.08,
+  });
+
+  demographics.youthPct = ageShares.youthPct;
+  demographics.workingAgePct = ageShares.workingAgePct;
+  demographics.elderlyPct = ageShares.elderlyPct;
+
+  const eduShares = getEducationLevelShares(nation);
+  demographics.belowPrimaryPct = eduShares.belowPrimary;
+  demographics.primaryOnlyPct = eduShares.primary;
+  demographics.secondaryPct = eduShares.secondary;
+  demographics.tertiaryPct = eduShares.tertiary;
+
+  const workingAgePoolM = (Number(nation.population) || 0) * (demographics.workingAgePct / 100);
+  const laborFitness = clamp(0.10 + health * 0.0012 + stability * 0.0008 + jobs * 0.0004 - warPressure * 0.04, 0.06, 0.22);
+  const supportFitness = clamp(0.05 + education * 0.0008 + health * 0.0004, 0.04, 0.12);
+
+  demographics.recruitablePct = laborFitness * 100;
+  demographics.recruitablePoolM = clamp(workingAgePoolM * laborFitness, 0.03, Math.max(0.03, workingAgePoolM * 0.35));
+  demographics.supportPersonnelPoolM = clamp(workingAgePoolM * supportFitness, 0.02, Math.max(0.02, workingAgePoolM * 0.2));
+
+  const priorPopulation = Number(previousPopulation) || Number(nation.population) || 1;
+  demographics.annualPopulationChangePct = clamp((((Number(nation.population) || 0) - priorPopulation) / Math.max(priorPopulation, 0.1)) * 12 * 100, -8, 8);
+  return demographics;
+}
+
+function renderPopulationDetailCard(nation) {
+  if (!nation) return '<div class="section-card"><p class="empty">No nation selected.</p></div>';
+
+  initNationDemographics(nation);
+  const demographics = nation.demographics || {};
+  const forces = nation.militaryForces || {};
+  const es = nation.eduState || {};
+  const activePersonnel = Number(forces.activePersonnel || 0);
+  const reservePersonnel = Number(forces.reservePersonnel || 0);
+  const recruitablePoolM = Number(demographics.recruitablePoolM || 0);
+  const serviceUsePct = recruitablePoolM > 0 ? clamp(((activePersonnel + reservePersonnel) / recruitablePoolM) * 100, 0, 100) : 0;
+
+  return `
+    <div class="section-card">
+      <h4>👥 Population & Demographics</h4>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;margin-top:8px">
+        <div class="resource-item"><span class="r-name">Population</span><span class="r-val">${formatHumanNumber((Number(nation.population) || 0) * 1_000_000, 1)}</span></div>
+        <div class="resource-item"><span class="r-name">Annual Change</span><span class="r-val ${Number(demographics.annualPopulationChangePct || 0) >= 0 ? 'positive' : 'negative'}">${Number(demographics.annualPopulationChangePct || 0).toFixed(2)}%</span></div>
+        <div class="resource-item"><span class="r-name">Youth</span><span class="r-val">${Number(demographics.youthPct || 0).toFixed(1)}%</span></div>
+        <div class="resource-item"><span class="r-name">Working Age</span><span class="r-val">${Number(demographics.workingAgePct || 0).toFixed(1)}%</span></div>
+        <div class="resource-item"><span class="r-name">Elderly</span><span class="r-val">${Number(demographics.elderlyPct || 0).toFixed(1)}%</span></div>
+        <div class="resource-item"><span class="r-name">Recruitable Pool</span><span class="r-val">${Number(recruitablePoolM || 0).toFixed(2)}M</span></div>
+      </div>
+    </div>
+    <div class="section-card">
+      <h4>🎓 Education Levels</h4>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;margin-top:8px">
+        <div class="resource-item"><span class="r-name">No / Low School</span><span class="r-val">${Number(demographics.belowPrimaryPct || 0).toFixed(1)}%</span></div>
+        <div class="resource-item"><span class="r-name">Primary</span><span class="r-val">${Number(demographics.primaryOnlyPct || 0).toFixed(1)}%</span></div>
+        <div class="resource-item"><span class="r-name">Secondary</span><span class="r-val">${Number(demographics.secondaryPct || 0).toFixed(1)}%</span></div>
+        <div class="resource-item"><span class="r-name">Tertiary</span><span class="r-val">${Number(demographics.tertiaryPct || 0).toFixed(1)}%</span></div>
+        <div class="resource-item"><span class="r-name">Literacy</span><span class="r-val">${Number(es.literacyRate || nation.education || 0).toFixed(1)}%</span></div>
+        <div class="resource-item"><span class="r-name">High Skill</span><span class="r-val">${Number(es.highSkillPct || 0).toFixed(1)}%</span></div>
+      </div>
+      <div style="margin-top:8px;font-size:11px;color:var(--text-secondary)">
+        Graduates / turn: ${Math.round(Number(es.primaryGrads || 0)).toLocaleString()} primary • ${Math.round(Number(es.secondaryGrads || 0)).toLocaleString()} secondary • ${Math.round(Number(es.tertiaryGrads || 0)).toLocaleString()} tertiary
+      </div>
+    </div>
+    <div class="section-card">
+      <h4>⚔️ Military Manpower</h4>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;margin-top:8px">
+        <div class="resource-item"><span class="r-name">Active Duty</span><span class="r-val">${activePersonnel.toFixed(2)}M</span></div>
+        <div class="resource-item"><span class="r-name">Reserve</span><span class="r-val">${reservePersonnel.toFixed(2)}M</span></div>
+        <div class="resource-item"><span class="r-name">Readiness</span><span class="r-val">${Number(forces.readiness || 0).toFixed(1)}</span></div>
+        <div class="resource-item"><span class="r-name">Maintenance</span><span class="r-val">${formatHumanMoneyMillions(Number(forces.maintenanceCost || 0), 2)}</span></div>
+        <div class="resource-item"><span class="r-name">Force Power</span><span class="r-val">${Number(forces.totalPower || 0).toFixed(1)}</span></div>
+        <div class="resource-item"><span class="r-name">Recruit Pool Used</span><span class="r-val ${serviceUsePct < 55 ? 'positive' : 'negative'}">${serviceUsePct.toFixed(1)}%</span></div>
+      </div>
+    </div>
+  `;
+}
+
+function showPopulationDetail(nationId) {
+  const overlay = document.getElementById('tabOverlay');
+  const content = document.getElementById('tabContent');
+  const title = document.getElementById('tabTitle');
+  if (!overlay || !content) return;
+
+  const nation = NATIONS[nationId] || (GAME.playerNation && GAME.playerNation.id === nationId ? GAME.playerNation : null);
+  if (!nation) return;
+
+  if (title) title.textContent = `👥 ${nation.name} Population`;
+  content.innerHTML = renderPopulationDetailCard(nation);
+  overlay.classList.remove('hidden');
 }
 
 const NATION_NUMERIC_DEFAULTS = {
@@ -1546,6 +1736,10 @@ function aiAdjustNationStrategy(nation, nationId) {
     target.social = clamp(target.social - 3, 4, 35);
   }
 
+  if (typeof applyGovernmentStrategyLayer === 'function') {
+    applyGovernmentStrategyLayer(nation, nationId, target);
+  }
+
   normalizeBudgetObject(target);
   // Faster adaptation for high decision quality leaders
   const adaptSpeed = clamp((nation.decisionQuality || 55) / 200, 0.12, 0.45);
@@ -1807,7 +2001,9 @@ function formatMetricDisplay(metric, value) {
 
 function runCountrySystemModel(nation, isPlayer = false, nationId = null) {
   ensureFiniteNationState(nation);
+  initNationDemographics(nation);
   const id = nationId || nation.id;
+  const previousPopulation = Number(nation.population || 0);
   nation.leaderTenureMonths = (nation.leaderTenureMonths || 0) + 1;
 
   if (!isPlayer) aiAdjustNationStrategy(nation, id);
@@ -2306,6 +2502,8 @@ function runCountrySystemModel(nation, isPlayer = false, nationId = null) {
     nation.failedState = true;
     addNews(`💥 ${nation.name} collapses into state failure`, 'critical');
   }
+
+  updateNationDemographics(nation, id, previousPopulation);
 
   nation.happiness = computeNationHappiness(nation);
   nation.resilience = computeNationResilience(nation);
@@ -3055,7 +3253,8 @@ function simulateTurn() {
   }
 
   processAlliancesAndConflicts();
-  processAllianceLending();
+  if (typeof processGovernmentDebtMarkets === 'function') processGovernmentDebtMarkets();
+  else processAllianceLending();
 
   // ── GEOPOLITICAL WAR SYSTEM ──────────────────────────────
   if (typeof processAIWarDecisions === 'function') processAIWarDecisions();
@@ -3063,6 +3262,7 @@ function simulateTurn() {
 
   // ── DEFENSE INDUSTRY PROCESSING ────────────────────────────
   processAllDefenseCompanies();
+  if (typeof processDefenseCompanyFoundings === 'function') processDefenseCompanyFoundings();
 
   // ── MILITARY FORCES PROCESSING ─────────────────────────────
   processAllNationMilitaryForces();
@@ -3070,6 +3270,15 @@ function simulateTurn() {
 
   // ── GLOBAL ARMS MARKET ────────────────────────────────────
   processArmsMarketAll();
+
+  // ── DIPLOMACY SYSTEM ──────────────────────────────────────
+  if (typeof processDiplomacyAll === 'function') processDiplomacyAll();
+
+  // ── ALLIANCE SEEKING (struggling nations seek superpowers) ──
+  if (typeof processAllianceSeeking === 'function') processAllianceSeeking();
+
+  // ── WORLD BANK & IMF ──────────────────────────────────────
+  if (typeof processWorldBankAll === 'function') processWorldBankAll();
 
   // ── ECONOMIC SYSTEMS ──────────────────────────────────────
   processAllEconomicSystems();
@@ -3852,6 +4061,7 @@ function renderNationCard() {
   const selected = GAME.selectedNation ? NATIONS[GAME.selectedNation] : null;
   const p = selected || GAME.playerNation;
   const sourceNation = (!selected && typeof getPlayerRecord === 'function') ? (getPlayerRecord() || p) : p;
+  initNationDemographics(sourceNation);
   const num = (value, fallback = 0) => {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : fallback;
@@ -3860,6 +4070,10 @@ function renderNationCard() {
   const budget = isPlayer ? GAME.budget : (p.aiBudget || doctrineBaseBudget('balanced'));
   const relation = isPlayer ? null : getRelation(p.id);
   const badge = typeof relation === 'number' ? getRelationBadge(relation) : null;
+  const taxSnapshot = typeof computeNationTaxRevenue === 'function' ? computeNationTaxRevenue(sourceNation) : null;
+  const companyRevenueSnapshot = Array.isArray(sourceNation.companies)
+    ? sourceNation.companies.reduce((sum, company) => sum + (Number(company?.revenue) || 0), 0)
+    : 0;
   const warCount = GAME.conflicts.filter(c => c.a === p.id || c.b === p.id).length;
   const allianceCount = GAME.alliances.filter(a => a.a === p.id || a.b === p.id).length;
   const statusTag = p.failedState ? '💥 Failed State' : (p.inCrisis ? '🚨 In Crisis' : '✅ Stable');
@@ -3882,18 +4096,28 @@ function renderNationCard() {
     ? (activeConflict.a === p.id ? activeConflict.aExhaustion : activeConflict.bExhaustion)
     : null;
   const generalCount = Array.isArray(p.generals) ? p.generals.filter(g => g?.isAlive !== false).length : 0;
+  const forces = sourceNation.militaryForces || {};
+  const demographics = sourceNation.demographics || {};
   const budgetMilitary = Math.round(num(budget.military));
   const budgetEconomy = Math.round(num(budget.economy));
   const budgetDiplomacy = Math.round(num(budget.diplomacy));
   const budgetIntel = Math.round(num(budget.intelligence));
   const budgetSpace = Math.round(num(budget.space));
   const budgetSocial = Math.round(num(budget.social));
-  const gdpVal = num(sourceNation.gdp);
-  const treasuryVal = num(sourceNation.treasury, num(GAME.treasury));
-  const taxRevenueVal = num(sourceNation.taxRevenue);
-  const corporateEarningsVal = num(sourceNation.corporateEarnings);
-  const informalEconomyVal = num(sourceNation.informalEconomy);
-  const populationVal = num(p.population);
+  const gdpVal = num(sourceNation.gdp, num(p.gdp));
+  const treasuryVal = isPlayer
+    ? num(GAME.treasury, num(sourceNation.treasury))
+    : num(sourceNation.treasury);
+  const taxRevenueVal = num(sourceNation.taxRevenue, num(taxSnapshot?.total));
+  const corporateEarningsVal = num(sourceNation.corporateEarnings, companyRevenueSnapshot);
+  const informalEconomyVal = num(
+    sourceNation.informalEconomy,
+    clamp(40 - num(sourceNation.governance) * 0.35 + num(sourceNation.corruption) * 0.25, 5, 70)
+  );
+  const populationVal = num(sourceNation.population, num(p.population));
+  const recruitablePoolVal = num(demographics.recruitablePoolM);
+  const activePersonnelVal = num(forces.activePersonnel);
+  const reservePersonnelVal = num(forces.reservePersonnel);
   const militaryPowerVal = clamp(num(p.militaryPower), 0, 100);
   const techLevelVal = num(p.techLevel);
   const healthVal = num(p.health);
@@ -3920,6 +4144,9 @@ function renderNationCard() {
   const localStockSnapshot = typeof getNationStockMarketSnapshot === 'function'
     ? getNationStockMarketSnapshot(sourceNation)
     : { listed: 0, marketCap: 0, topGainer: null, topLoser: null };
+  const governmentSummary = typeof getNationGovernmentSummary === 'function'
+    ? getNationGovernmentSummary(sourceNation, p.id)
+    : null;
   const formatMarketMoneyCard = (amountM) => {
     return formatHumanMoneyMillions(amountM, 2);
   };
@@ -3944,7 +4171,9 @@ function renderNationCard() {
       <div class="stat-row"><span class="stat-label">Informal Economy</span><span class="stat-val ${informalEconomyVal > 30 ? 'negative' : 'positive'}">${informalEconomyVal.toFixed(1)}%</span></div>
       <div class="stat-row"><span class="stat-label">Companies</span><span class="stat-val">${(sourceNation.companies || []).length}</span></div>
       <div class="stat-row"><span class="stat-label">Population</span><span class="stat-val">${formatHumanNumber(populationVal * 1_000_000, 1)}</span></div>
+      <div class="stat-row"><span class="stat-label">Recruitable Pool</span><span class="stat-val">${recruitablePoolVal.toFixed(2)}M</span></div>
       <div class="stat-row"><span class="stat-label">Military</span><span class="stat-val"><span class="bar-fill" style="width:${Math.round(militaryPowerVal)}%">${Math.round(militaryPowerVal)}</span></span></div>
+      <div class="stat-row"><span class="stat-label">Active / Reserve</span><span class="stat-val">${activePersonnelVal.toFixed(2)}M / ${reservePersonnelVal.toFixed(2)}M</span></div>
       <div class="stat-row"><span class="stat-label">Tech Avg</span><span class="stat-val">T${techLevelVal.toFixed(1)}</span></div>
       <div class="stat-row"><span class="stat-label">Technologies</span><span class="stat-val" style="color:var(--accent-blue)">${countNationTechs(p)}</span></div>
       <div class="stat-row"><span class="stat-label">Health</span><span class="stat-val">${healthVal.toFixed(1)}</span></div>
@@ -3969,6 +4198,11 @@ function renderNationCard() {
       <div class="stat-row"><span class="stat-label">Recession</span><span class="stat-val">${Math.round(recessionMonthsVal)}m</span></div>
       <div class="stat-row"><span class="stat-label">Crisis Risk</span><span class="stat-val ${crisisRiskVal <= 45 ? 'positive' : 'negative'}">${crisisRiskVal.toFixed(1)}</span></div>
       <div class="stat-row"><span class="stat-label">State AI</span><span class="stat-val">${decisionQualityVal.toFixed(1)}</span></div>
+      ${governmentSummary?.finance ? `<div class="stat-row"><span class="stat-label">Credit Score</span><span class="stat-val ${governmentSummary.finance.creditScore >= 65 ? 'positive' : 'negative'}">${governmentSummary.finance.creditScore.toFixed(0)}</span></div>` : ''}
+      ${governmentSummary?.finance ? `<div class="stat-row"><span class="stat-label">Buying / Borrowing</span><span class="stat-val">${(typeof formatHumanTrillions === 'function' ? formatHumanTrillions(governmentSummary.finance.buyingPowerT, 2) : governmentSummary.finance.buyingPowerT.toFixed(2) + 'T')} / ${(typeof formatHumanTrillions === 'function' ? formatHumanTrillions(governmentSummary.finance.borrowingPowerT, 2) : governmentSummary.finance.borrowingPowerT.toFixed(2) + 'T')}</span></div>` : ''}
+      ${governmentSummary?.loanView ? `<div class="stat-row"><span class="stat-label">Loans In / Out</span><span class="stat-val">${governmentSummary.loanView.incoming.length} / ${governmentSummary.loanView.outgoing.length}</span></div>` : ''}
+      ${governmentSummary?.topGoal ? `<div class="stat-row"><span class="stat-label">Top Priority</span><span class="stat-val">${governmentSummary.topGoal.title}</span></div>` : ''}
+      ${governmentSummary?.rival ? `<div class="stat-row"><span class="stat-label">Primary Rival</span><span class="stat-val ${governmentSummary.rival.threatScore >= 70 ? 'negative' : 'positive'}">${governmentSummary.rival.flag || ''} ${governmentSummary.rival.name}</span></div>` : ''}
       <div class="stat-row"><span class="stat-label">Generals</span><span class="stat-val">${generalCount}</span></div>
       <div class="stat-row"><span class="stat-label">Happiness</span><span class="stat-val">${happinessVal.toFixed(1)}</span></div>
       <div class="stat-row"><span class="stat-label">Resilience</span><span class="stat-val">${resilienceVal.toFixed(1)}</span></div>
@@ -3982,17 +4216,59 @@ function renderNationCard() {
         : `<div class="stat-row"><span class="stat-label">Relation</span><span class="stat-val ${relation >= 0 ? 'positive' : 'negative'}">${relation >= 0 ? '+' : ''}${relation}</span></div>`}
     </div>
     ${badge ? `<div class="nation-relations"><span class="relation-badge ${badge.cls}">${badge.text}</span></div>` : ''}
+    ${!isPlayer ? renderNationDiplomacySummary(p.id) : ''}
     <div class="nation-actions">
       ${isPlayer ? '' : `<button class="btn-sm" onclick="GAME.selectedNation = '${GAME.playerNation.id}'; renderNationCard(); renderMap();">🏠 Back To Player</button>`}
+      <button class="btn-sm" onclick="showPopulationDetail('${p.id}')">👥 Population</button>
       <button class="btn-sm" onclick="openTab('econ')">📊 View Economy</button>
       ${isPlayer ? `<button class="btn-sm" onclick="openTab('diplo')">🤝 Diplomacy</button>` : `<button class="btn-sm" onclick="playerDeclareWar('${p.id}')">⚔️ Declare War</button>`}
       ${isPlayer ? `<button class="btn-sm" onclick="openTab('research')">🔬 R&D Lab</button>` : `<button class="btn-sm" onclick="playerFormAlliance('${p.id}')">🤝 Alliance</button>`}
       ${isPlayer ? `<button class="btn-sm" onclick="openTab('space')">🚀 Space</button>` : `<button class="btn-sm" onclick="openForeignNationIntel('${p.id}')">🔍 Investigate</button>`}
       ${isPlayer ? `<button class="btn-sm" onclick="openTab('mil')">⚔️ Military</button>` : `<button class="btn-sm" onclick="openForeignNationIntel('${p.id}')">🏭 Defense Industry</button>`}
+      <button class="btn-sm" onclick="showInternalAffairs('${p.id}')">🏛 Internal Affairs</button>
       ${isPlayer ? `<button class="btn-sm" onclick="openTab('history')">📈 Intel</button>` : `<button class="btn-sm" onclick="playerRaidResources('${p.id}')">🛢️ Raid</button>`}
     </div>
   `;
 }
+
+function renderNationDiplomacySummary(nationId) {
+  initDiplomacyState();
+  const ds = GAME.diplomacyState;
+  const playerId = GAME.playerNation.id;
+  
+  // Get diplomacy info for this nation
+  const sanctions = Object.entries(ds.sanctions || {}).filter(([key]) => key.includes(nationId));
+  const tradeAgreements = Object.entries(ds.tradeAgreements || {}).filter(([key]) => key.includes(nationId));
+  const investments = Object.entries(ds.investments || {}).filter(([key]) => key.includes(nationId));
+  const aid = Object.entries(ds.foreignAid || {}).filter(([key]) => key.includes(nationId));
+  
+  if (sanctions.length === 0 && tradeAgreements.length === 0 && investments.length === 0 && aid.length === 0) {
+    return '';
+  }
+  
+  let html = '<div class="nation-diplomacy-summary">';
+  html += '<div class="diplomacy-summary-header">🕊️ Diplomacy Overview</div>';
+  
+  if (sanctions.length > 0) {
+    html += '<div class="diplomacy-summary-item negative">🚫 Sanctions: ' + sanctions.length + '</div>';
+  }
+  if (tradeAgreements.length > 0) {
+    html += '<div class="diplomacy-summary-item positive">📜 Trade Agreements: ' + tradeAgreements.length + '</div>';
+  }
+  if (investments.length > 0) {
+    const totalInvested = investments.reduce((sum, [, inv]) => sum + inv.amount, 0);
+    html += '<div class="diplomacy-summary-item">💰 Investments: $' + (totalInvested * 1000).toFixed(0) + 'M</div>';
+  }
+  if (aid.length > 0) {
+    const totalAid = aid.reduce((sum, [, a]) => sum + a.amount, 0);
+    html += '<div class="diplomacy-summary-item">🤝 Aid: $' + (totalAid * 1000).toFixed(0) + 'M</div>';
+  }
+  
+  html += '</div>';
+  return html;
+}
+
+window.showPopulationDetail = showPopulationDetail;
 
 // ============================================================
 // TAB SYSTEM
@@ -4031,11 +4307,13 @@ const TAB_NAMES = {
   mil: '⚔️ Military',
   conflict: '⚔️ Conflicts',
   diplo: '🤝 Diplomacy',
+  worldbank: '🏦 World Bank',
   intel: '🕵️ Intelligence',
   space: '🚀 Space Program',
   research: '🔬 Research & Tech',
   history: '📈 Historical Data',
   leaderboard: '🏆 Rankings',
+  defensecos: '🏭 Defense Companies',
 };
 
 function openTab(tabName) {
@@ -4060,7 +4338,7 @@ function refreshRealtimeTabs() {
   if (dom.tabOverlay.classList.contains('hidden')) return;
 
   // Keep high-churn analytics tabs live while simulation runs.
-  if (GAME.activeTab === 'history' || GAME.activeTab === 'leaderboard' || GAME.activeTab === 'econ' || GAME.activeTab === 'finance' || GAME.activeTab === 'intel' || GAME.activeTab === 'news') {
+  if (GAME.activeTab === 'history' || GAME.activeTab === 'leaderboard' || GAME.activeTab === 'econ' || GAME.activeTab === 'finance' || GAME.activeTab === 'intel' || GAME.activeTab === 'news' || GAME.activeTab === 'defensecos' || GAME.activeTab === 'worldbank') {
     renderTabContent(GAME.activeTab);
   }
 }
@@ -4104,6 +4382,9 @@ function renderTabContent(tab) {
       content.innerHTML = renderDiplomacyTab();
       attachDiplomacyListeners();
       break;
+    case 'worldbank':
+      content.innerHTML = typeof renderWorldBankTab === 'function' ? renderWorldBankTab() : '<div class="tab-error">World Bank module unavailable.</div>';
+      break;
     case 'intel':
       content.innerHTML = renderIntelTab();
       if (typeof attachNewsCenterListeners === 'function') {
@@ -4124,6 +4405,10 @@ function renderTabContent(tab) {
     case 'leaderboard':
       content.innerHTML = renderLeaderboardTab();
       attachLeaderboardListeners();
+      break;
+    case 'defensecos':
+      content.innerHTML = renderDefenseCompaniesTab();
+      if (typeof attachDefenseCompaniesTabInteractions === 'function') attachDefenseCompaniesTabInteractions();
       break;
     default:
       content.innerHTML = `<p class="text-muted">Tab content not available.</p>`;
@@ -4362,23 +4647,165 @@ function renderConflictsTab() {
 // TAB: DIPLOMACY
 // ============================================================
 function renderDiplomacyTab() {
+  initDiplomacyState();
+  const ds = GAME.diplomacyState;
+  const playerId = GAME.playerNation.id;
+  
+  // Player's diplomatic events
+  const playerEvents = (ds.diplomaticEvents || []).filter(e => e.nation === playerId || e.target === playerId).slice(0, 15);
+  
+  // Player's sanctions
+  const playerSanctions = Object.entries(ds.sanctions || {}).filter(([key]) => key.includes(playerId));
+  
+  // Player's trade agreements
+  const playerTradeAgreements = Object.entries(ds.tradeAgreements || {}).filter(([key]) => key.includes(playerId));
+  
+  // Player's investments
+  const playerInvestments = Object.entries(ds.investments || {}).filter(([key]) => key.includes(playerId));
+  
+  // Player's foreign aid
+  const playerAid = Object.entries(ds.foreignAid || {}).filter(([key]) => key.includes(playerId));
+  
+  // Player's coalitions
+  const playerCoalitions = (ds.coalitions || []).filter(c => c.members.includes(playerId));
+
   const nations = Object.values(NATIONS)
-    .filter(n => n.id !== GAME.playerNation.id)
+    .filter(n => n.id !== playerId)
     .sort((a, b) => a.name.localeCompare(b.name));
 
   return `
     <div class="tab-section">
-      <h3>Global Diplomacy</h3>
+      <h3>🕊️ Diplomatic Overview</h3>
       <div class="resource-grid">
         <div class="resource-item"><span class="r-name">Alliances</span><span class="r-val">${GAME.alliances.length}</span></div>
         <div class="resource-item"><span class="r-name">Friendly States</span><span class="r-val positive">${nations.filter(n => getRelation(n.id) >= 20).length}</span></div>
         <div class="resource-item"><span class="r-name">Hostile States</span><span class="r-val negative">${nations.filter(n => getRelation(n.id) <= -20).length}</span></div>
-        <div class="resource-item"><span class="r-name">Player Alliances</span><span class="r-val">${GAME.alliances.filter(a => a.a === GAME.playerNation.id || a.b === GAME.playerNation.id).length}</span></div>
+        <div class="resource-item"><span class="r-name">Active Sanctions</span><span class="r-val negative">${playerSanctions.length}</span></div>
+        <div class="resource-item"><span class="r-name">Trade Agreements</span><span class="r-val positive">${playerTradeAgreements.length}</span></div>
+        <div class="resource-item"><span class="r-name">Investments</span><span class="r-val">${playerInvestments.length}</span></div>
+        <div class="resource-item"><span class="r-name">Coalitions</span><span class="r-val">${playerCoalitions.length}</span></div>
+        <div class="resource-item"><span class="r-name">Diplomacy Budget</span><span class="r-val">${GAME.budget.diplomacy}%</span></div>
       </div>
-      <p class="text-muted" style="margin-top:8px">Conflicts are now managed in the dedicated Conflicts tab.</p>
     </div>
+
+    ${playerEvents.length > 0 ? `
     <div class="tab-section">
-      <h3>Foreign Relations</h3>
+      <h3>📋 Diplomatic Activities</h3>
+      ${playerEvents.map(e => {
+        const isOutgoing = e.nation === playerId;
+        const otherId = isOutgoing ? e.target : e.nation;
+        const other = NATIONS[otherId];
+        const flag = other ? other.flag : '🏳️';
+        const name = other ? other.name : otherId;
+        const icon = e.success ? '✅' : '❌';
+        const relChange = e.relationChange > 0 ? `+${e.relationChange}` : e.relationChange;
+        const relColor = e.relationChange > 0 ? 'positive' : 'negative';
+        return `
+          <div class="diplomacy-event-item">
+            <span>${icon} ${e.message}</span>
+            <span class="${relColor}">Relation: ${relChange}</span>
+          </div>
+        `;
+      }).join('')}
+    </div>
+    ` : '<div class="tab-section"><h3>📋 Diplomatic Activities</h3><p class="text-muted">No recent diplomatic activities.</p></div>'}
+
+    ${playerTradeAgreements.length > 0 ? `
+    <div class="tab-section">
+      <h3>📜 Trade Agreements</h3>
+      ${playerTradeAgreements.map(([key, agreement]) => {
+        const [aId, bId] = key.split('_');
+        const partnerId = aId === playerId ? bId : aId;
+        const partner = NATIONS[partnerId];
+        const turnsLeft = agreement.duration - (GAME.turn - agreement.turn);
+        return `
+          <div class="diplomacy-detail-item">
+            <span>${partner ? partner.flag : '🏳️'} ${partner ? partner.name : partnerId}</span>
+            <span>GDP Boost: +${(agreement.gdpBoost * 100).toFixed(1)}% | ${turnsLeft} turns left</span>
+          </div>
+        `;
+      }).join('')}
+    </div>
+    ` : ''}
+
+    ${playerInvestments.length > 0 ? `
+    <div class="tab-section">
+      <h3>💰 Investments & Returns</h3>
+      ${playerInvestments.map(([key, investment]) => {
+        const [aId, bId] = key.split('_');
+        const isInvestor = aId === playerId;
+        const otherId = isInvestor ? bId : aId;
+        const other = NATIONS[otherId];
+        const turnsLeft = investment.maturityTurn - GAME.turn;
+        const profit = investment.expectedReturn - investment.amount;
+        const profitColor = profit > 0 ? 'positive' : 'negative';
+        return `
+          <div class="diplomacy-detail-item">
+            <span>${isInvestor ? '📤 Invested in' : '📥 Received from'} ${other ? other.flag : '🏳️'} ${other ? other.name : otherId}</span>
+            <span>$${(investment.amount * 1000).toFixed(0)}M | Expected: <span class="${profitColor}">+${(profit * 1000).toFixed(0)}M</span> | ${turnsLeft > 0 ? turnsLeft + ' turns' : 'Matured'}</span>
+          </div>
+        `;
+      }).join('')}
+    </div>
+    ` : ''}
+
+    ${playerAid.length > 0 ? `
+    <div class="tab-section">
+      <h3>🤝 Foreign Aid</h3>
+      ${playerAid.map(([key, aid]) => {
+        const [aId, bId] = key.split('_');
+        const isGiver = aId === playerId;
+        const otherId = isGiver ? bId : aId;
+        const other = NATIONS[otherId];
+        return `
+          <div class="diplomacy-detail-item">
+            <span>${isGiver ? '📤 Aid given to' : '📥 Aid received from'} ${other ? other.flag : '🏳️'} ${other ? other.name : otherId}</span>
+            <span>$${(aid.amount * 1000).toFixed(0)}M | ${aid.purpose}</span>
+          </div>
+        `;
+      }).join('')}
+    </div>
+    ` : ''}
+
+    ${playerSanctions.length > 0 ? `
+    <div class="tab-section">
+      <h3>🚫 Sanctions</h3>
+      ${playerSanctions.map(([key, sanction]) => {
+        const [aId, bId] = key.split('_');
+        const isTarget = bId === playerId;
+        const otherId = isTarget ? aId : bId;
+        const other = NATIONS[otherId];
+        return `
+          <div class="diplomacy-detail-item">
+            <span>${isTarget ? '⚠️ Sanctioned by' : '🚫 Sanctioning'} ${other ? other.flag : '🏳️'} ${other ? other.name : otherId}</span>
+            <span>Severity: ${sanction.severity} | ${sanction.reason}</span>
+          </div>
+        `;
+      }).join('')}
+    </div>
+    ` : ''}
+
+    ${playerCoalitions.length > 0 ? `
+    <div class="tab-section">
+      <h3>⚔️ Coalitions</h3>
+      ${playerCoalitions.map(coalition => {
+        const target = NATIONS[coalition.target];
+        const memberNames = coalition.members.map(id => {
+          const n = NATIONS[id];
+          return n ? `${n.flag} ${n.name}` : id;
+        }).join(', ');
+        return `
+          <div class="diplomacy-detail-item">
+            <span>Target: ${target ? target.flag : '🏳️'} ${target ? target.name : coalition.target}</span>
+            <span>Members: ${memberNames}</span>
+          </div>
+        `;
+      }).join('')}
+    </div>
+    ` : ''}
+
+    <div class="tab-section">
+      <h3>🌍 Foreign Relations</h3>
       <p class="text-muted mb-1">Relations with other nations</p>
       ${nations.map(n => {
         const rel = getRelation(n.id);
@@ -4397,13 +4824,16 @@ function renderDiplomacyTab() {
         `;
       }).join('')}
     </div>
+
     <div class="tab-section">
-      <h3>Diplomatic Actions</h3>
+      <h3>🕊️ Diplomatic Actions</h3>
       <div class="action-grid" style="grid-template-columns:1fr 1fr">
-        <button class="action-btn">✍️ Sign Treaty</button>
-        <button class="action-btn">📦 Send Aid</button>
-        <button class="action-btn">🚫 Sanctions</button>
-        <button class="action-btn">🤝 Alliance</button>
+        <button class="action-btn" onclick="playerDiplomaticAction('summit')">🤝 Diplomatic Summit</button>
+        <button class="action-btn" onclick="playerDiplomaticAction('aid')">📦 Send Aid</button>
+        <button class="action-btn" onclick="playerDiplomaticAction('sanctions')">🚫 Impose Sanctions</button>
+        <button class="action-btn" onclick="playerDiplomaticAction('trade')">📜 Trade Agreement</button>
+        <button class="action-btn" onclick="playerDiplomaticAction('invest')">💰 Invest Abroad</button>
+        <button class="action-btn" onclick="playerDiplomaticAction('alliance')">🤝 Form Alliance</button>
       </div>
     </div>
   `;
@@ -4418,6 +4848,126 @@ function attachDiplomacyListeners() {
       closeTab();
     });
   });
+}
+
+function playerDiplomaticAction(action) {
+  initDiplomacyState();
+  const playerId = GAME.playerNation.id;
+  const player = GAME.playerNation;
+  
+  // Get selected nation or first available
+  const targetId = GAME.selectedNation || Object.keys(NATIONS).find(id => id !== playerId);
+  if (!targetId || targetId === playerId) {
+    addNews('🕊️ Select a nation first to perform diplomatic actions.', 'minor');
+    return;
+  }
+  
+  const target = NATIONS[targetId];
+  if (!target) return;
+  
+  const key = relationshipKey(playerId, targetId);
+  const currentRel = getRelationBetween(playerId, targetId);
+  
+  switch (action) {
+    case 'summit':
+      const success = Math.random() < clamp(0.5 + GAME.budget.diplomacy * 0.02, 0.3, 0.8);
+      const relChange = success ? clamp(3 + Math.floor(Math.random() * 6), 2, 10) : clamp(-1 - Math.floor(Math.random() * 3), -4, -1);
+      GAME.bilateralRelations[key] = clamp(currentRel + relChange, -100, 100);
+      addNews(success 
+        ? `🕊️ President ${player.leader} held diplomatic summit with ${target.flag} ${target.name}, improving relations by +${relChange}.`
+        : `🕊️ Diplomatic summit with ${target.flag} ${target.name} ended in disagreement. Relation: ${relChange}.`,
+        success ? 'minor' : 'major');
+      break;
+      
+    case 'aid':
+      const aidAmount = clamp(player.gdp * 0.02, 0.1, 1.0);
+      if (GAME.treasury < aidAmount * 100) {
+        addNews(`🕊️ Insufficient treasury to send aid to ${target.name}.`, 'major');
+        return;
+      }
+      GAME.treasury -= aidAmount * 100;
+      GAME.diplomacyState.foreignAid[`${playerId}_${targetId}`] = {
+        amount: aidAmount,
+        turn: GAME.turn,
+        purpose: 'humanitarian'
+      };
+      target.gdp = clamp(target.gdp + aidAmount * 0.02, 0.05, 100);
+      target.stability = clamp(target.stability + aidAmount * 2, 1, 100);
+      GAME.bilateralRelations[key] = clamp(currentRel + 5, -100, 100);
+      addNews(`🤝 ${player.flag} ${player.name} sends $${(aidAmount * 1000).toFixed(0)}M humanitarian aid to ${target.flag} ${target.name}.`, 'minor');
+      break;
+      
+    case 'sanctions':
+      if (currentRel > -20) {
+        addNews(`🕊️ Relations with ${target.name} are not hostile enough to justify sanctions.`, 'minor');
+        return;
+      }
+      const severity = clamp(5 + Math.floor(Math.random() * 10), 3, 15);
+      GAME.diplomacyState.sanctions[key] = {
+        severity,
+        turn: GAME.turn,
+        reason: 'player imposed sanctions',
+        imposedBy: playerId
+      };
+      target.gdp = clamp(target.gdp * (1 - severity * 0.008), 0.05, 100);
+      target.stability = clamp(target.stability - severity * 0.3, 1, 100);
+      addNews(`⚠️ ${player.flag} ${player.name} imposes sanctions on ${target.flag} ${target.name} (severity: ${severity}).`, 'major');
+      break;
+      
+    case 'trade':
+      if (currentRel < 10) {
+        addNews(`🕊️ Relations with ${target.name} are not friendly enough for a trade agreement.`, 'minor');
+        return;
+      }
+      if (GAME.diplomacyState.tradeAgreements[key]) {
+        addNews(`🕊️ Already have a trade agreement with ${target.name}.`, 'minor');
+        return;
+      }
+      const gdpBoost = clamp(0.01 + Math.random() * 0.03, 0.005, 0.05);
+      GAME.diplomacyState.tradeAgreements[key] = {
+        turn: GAME.turn,
+        gdpBoost,
+        duration: 10 + Math.floor(Math.random() * 10)
+      };
+      GAME.bilateralRelations[key] = clamp(currentRel + 5, -100, 100);
+      addNews(`📋 ${player.flag} ${player.name} and ${target.flag} ${target.name} sign trade agreement (GDP boost: +${(gdpBoost * 100).toFixed(1)}%).`, 'minor');
+      break;
+      
+    case 'invest':
+      if (currentRel < 15) {
+        addNews(`🕊️ Relations with ${target.name} are not strong enough for investment.`, 'minor');
+        return;
+      }
+      if (GAME.diplomacyState.investments[key]) {
+        addNews(`🕊️ Already invested in ${target.name}.`, 'minor');
+        return;
+      }
+      const investAmount = clamp(player.gdp * 0.05, 0.1, 2.0);
+      if (GAME.treasury < investAmount * 100) {
+        addNews(`🕊️ Insufficient treasury to invest in ${target.name}.`, 'major');
+        return;
+      }
+      GAME.treasury -= investAmount * 100;
+      const expectedReturn = investAmount * (1.2 + Math.random() * 0.5);
+      GAME.diplomacyState.investments[key] = {
+        amount: investAmount,
+        turn: GAME.turn,
+        expectedReturn,
+        maturityTurn: GAME.turn + 10,
+        companies: target.companies?.slice(0, 3).map(c => c.name) || ['Various']
+      };
+      target.gdp = clamp(target.gdp + investAmount * 0.015, 0.05, 100);
+      GAME.bilateralRelations[key] = clamp(currentRel + 4, -100, 100);
+      addNews(`💰 ${player.flag} ${player.name} invests $${(investAmount * 1000).toFixed(0)}M in ${target.flag} ${target.name} companies.`, 'minor');
+      break;
+      
+    case 'alliance':
+      playerFormAlliance(targetId);
+      break;
+  }
+  
+  renderNationCard();
+  refreshRealtimeTabs();
 }
 
 // ============================================================

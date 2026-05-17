@@ -247,6 +247,285 @@ function getActiveEquipmentPower(nation) {
   return power;
 }
 
+function getWarCrisisKey(attackerId, defenderId) {
+  return `${attackerId}::${defenderId}`;
+}
+
+function ensureWarMobilizationState() {
+  if (!GAME.warMobilizationCrises || typeof GAME.warMobilizationCrises !== 'object') {
+    GAME.warMobilizationCrises = {};
+  }
+  return GAME.warMobilizationCrises;
+}
+
+function getNationWarReadinessProfile(nation, defender, goal = 'conquer') {
+  const forces = nation?.militaryForces || {};
+  const readinessRatio = clamp((Number(forces.readiness) || 0) / 100, 0, 1);
+  const trainingRatio = clamp((Number(forces.trainingQuality) || 45) / 100, 0, 1);
+  const fundingRatio = clamp(Number(forces.lastFundingRatio || 0.75), 0, 1.5);
+  const fundingCoverage = clamp(fundingRatio / 1.05, 0, 1);
+  const manpowerPressure = clamp((Number(forces.manpowerPressure) || 55) / 100, 0, 1.5);
+  const manpowerCoverage = clamp(1 - Math.max(0, manpowerPressure - 0.85) * 1.6, 0, 1);
+
+  const activeTroops = Math.max(5000, Math.round((Number(forces.activePersonnel) || 0.02) * 1000000));
+  const scale = clamp(Math.sqrt(activeTroops / 140000), 0.65, 4.2);
+  const requiredActive = {
+    tanks: Math.max(10, Math.round(8 * scale)),
+    fighters: Math.max(6, Math.round(6 * scale)),
+    missileSystems: Math.max(20, Math.round(15 * scale)),
+    artillery: Math.max(14, Math.round(12 * scale)),
+  };
+  if (goal === 'defend') {
+    requiredActive.tanks = Math.max(8, Math.round(requiredActive.tanks * 0.75));
+    requiredActive.fighters = Math.max(4, Math.round(requiredActive.fighters * 0.75));
+    requiredActive.missileSystems = Math.max(12, Math.round(requiredActive.missileSystems * 0.7));
+    requiredActive.artillery = Math.max(10, Math.round(requiredActive.artillery * 0.8));
+  }
+
+  const activeLevels = {
+    tanks: Math.max(0, Number(forces.tanks?.active) || 0),
+    fighters: Math.max(0, Number(forces.fighters?.active) || 0),
+    missileSystems: Math.max(0, Number(forces.missileSystems?.active) || 0),
+    artillery: Math.max(0, Number(forces.artillery?.active) || 0),
+  };
+
+  const heavyCoverageByType = {};
+  let heavyCoverageMet = 0;
+  Object.keys(requiredActive).forEach((k) => {
+    const ratio = clamp(activeLevels[k] / Math.max(1, requiredActive[k]), 0, 1.6);
+    heavyCoverageByType[k] = ratio;
+    if (ratio >= 1) heavyCoverageMet += 1;
+  });
+  const heavyCoverage = clamp(
+    Object.values(heavyCoverageByType).reduce((sum, val) => sum + val, 0) / 4,
+    0,
+    1.4
+  );
+
+  const demandProfile = typeof getNationEquipmentDemand === 'function'
+    ? getNationEquipmentDemand(nation)
+    : {};
+  const stockCoverageCats = ['tank', 'fighter', 'missile', 'artillery', 'drone', 'ifv'];
+  let stockCoverageTotal = 0;
+  let stockCoverageWeight = 0;
+  stockCoverageCats.forEach((category) => {
+    const desired = Math.max(1, Number(demandProfile[category] || 0));
+    const inventory = typeof getCategoryInventoryTotal === 'function'
+      ? Number(getCategoryInventoryTotal(nation, category) || 0)
+      : 0;
+    const weight = ['tank', 'fighter', 'missile', 'artillery'].includes(category) ? 2 : 1;
+    stockCoverageTotal += clamp(inventory / desired, 0, 1.35) * weight;
+    stockCoverageWeight += weight;
+  });
+  const stockpileCoverage = stockCoverageWeight > 0
+    ? clamp(stockCoverageTotal / stockCoverageWeight, 0, 1.35)
+    : 0.45;
+
+  const companies = typeof getNationDefenseCompanies === 'function'
+    ? (getNationDefenseCompanies(nation) || [])
+    : [];
+  let procurementCoverage = 0.42;
+  if (companies.length > 0) {
+    let procurementSum = 0;
+    let procurementWeight = 0;
+    let pendingOrders = 0;
+    companies.forEach((company) => {
+      const cov = clamp(Number(company?.lastProcurement?.coverage || 0.58), 0, 1);
+      const weight = Math.max(1, Number(company?.tier || 1));
+      procurementSum += cov * weight;
+      procurementWeight += weight;
+      pendingOrders += (company?.pendingOrders?.length || 0);
+    });
+    const backlogPenalty = clamp(pendingOrders / Math.max(6, companies.length * 9), 0, 0.45);
+    procurementCoverage = clamp((procurementWeight > 0 ? procurementSum / procurementWeight : 0.5) - backlogPenalty, 0, 1);
+  }
+
+  const logisticsCoverage = clamp(
+    readinessRatio * 0.42 +
+    trainingRatio * 0.18 +
+    fundingCoverage * 0.24 +
+    manpowerCoverage * 0.16,
+    0,
+    1
+  );
+
+  const attackerPower = getActiveEquipmentPower(nation);
+  const defenderPower = defender ? getActiveEquipmentPower(defender) : 0;
+  const minimumPowerFloor = clamp(36 + scale * 22, 30, 180);
+  const relativePowerCoverage = defender
+    ? clamp(attackerPower / Math.max(minimumPowerFloor, defenderPower * 0.55), 0, 1.4)
+    : clamp(attackerPower / minimumPowerFloor, 0, 1.4);
+
+  const hardFailures = [];
+  if (readinessRatio < 0.45) hardFailures.push('low_readiness');
+  if (heavyCoverageMet < 2) hardFailures.push('insufficient_heavy_equipment');
+  if (stockpileCoverage < 0.52) hardFailures.push('low_stockpile_coverage');
+  if (relativePowerCoverage < 0.65) hardFailures.push('insufficient_active_equipment_power');
+
+  const overallCoverage = clamp(
+    heavyCoverage * 0.30 +
+    stockpileCoverage * 0.30 +
+    logisticsCoverage * 0.22 +
+    procurementCoverage * 0.18,
+    0,
+    1.4
+  );
+
+  const sharpCoverage = clamp(logisticsCoverage * 0.45 + procurementCoverage * 0.35 + stockpileCoverage * 0.20, 0, 1);
+  const declarationFactor = hardFailures.length > 0 ? 0 : clamp(Math.pow(sharpCoverage, 2.35), 0.02, 1);
+
+  return {
+    hardFailures,
+    hardBlocked: hardFailures.length > 0,
+    readinessRatio,
+    stockpileCoverage,
+    procurementCoverage,
+    logisticsCoverage,
+    heavyCoverage,
+    heavyCoverageByType,
+    heavyCoverageMet,
+    requiredActive,
+    activeLevels,
+    activeEquipmentPower: attackerPower,
+    relativePowerCoverage,
+    overallCoverage,
+    declarationFactor,
+  };
+}
+
+function registerWarMobilizationCrisis(attackerId, defenderId, profile, contextReason = 'equipment_shortfall') {
+  const crises = ensureWarMobilizationState();
+  const key = getWarCrisisKey(attackerId, defenderId);
+  const attacker = NATIONS[attackerId];
+  const defender = NATIONS[defenderId];
+  if (!attacker || !defender || attacker.failedState || defender.failedState) return;
+
+  const existing = crises[key];
+  if (existing && existing.status === 'active') {
+    existing.lastUpdatedTurn = GAME.turn || 0;
+    existing.readiness = profile;
+    existing.reason = contextReason;
+    return;
+  }
+
+  const severityPenalty = Math.max(0, 3 - Number(profile?.heavyCoverageMet || 0));
+  const delayTurns = clamp(3 + Math.floor(Math.random() * 3) + severityPenalty, 3, 9);
+
+  crises[key] = {
+    key,
+    attackerId,
+    defenderId,
+    status: 'active',
+    phase: 'crisis',
+    reason: contextReason,
+    createdTurn: GAME.turn || 0,
+    lastUpdatedTurn: GAME.turn || 0,
+    earliestWarTurn: (GAME.turn || 0) + delayTurns,
+    attempts: 0,
+    readiness: profile,
+  };
+
+  const shortageLabel = (profile?.hardFailures || []).join(', ') || 'equipment gap';
+  addNews(`🚨 CRISIS MOBILIZATION: ${attacker.name} escalates against ${defender.name} but delays war to rearm (${shortageLabel}).`, 'major');
+}
+
+function processWarMobilizationCrises() {
+  const crises = ensureWarMobilizationState();
+  const keys = Object.keys(crises);
+  if (!keys.length) return;
+
+  keys.forEach((key) => {
+    const crisis = crises[key];
+    if (!crisis || crisis.status !== 'active') {
+      delete crises[key];
+      return;
+    }
+
+    const attacker = NATIONS[crisis.attackerId];
+    const defender = NATIONS[crisis.defenderId];
+    if (!attacker || !defender || attacker.failedState || defender.failedState) {
+      delete crises[key];
+      return;
+    }
+
+    if (hasActiveTruce(crisis.attackerId, crisis.defenderId)) {
+      crisis.status = 'cancelled';
+      delete crises[key];
+      return;
+    }
+
+    if (GAME.conflicts.some(c =>
+      (c.a === crisis.attackerId && c.b === crisis.defenderId) ||
+      (c.a === crisis.defenderId && c.b === crisis.attackerId)
+    )) {
+      crisis.status = 'resolved';
+      delete crises[key];
+      return;
+    }
+
+    if (attacker.aiBudget && typeof attacker.aiBudget === 'object') {
+      attacker.aiBudget.military = clamp((attacker.aiBudget.military || 20) + 1.8, 8, 72);
+      attacker.aiBudget.economy = clamp((attacker.aiBudget.economy || 20) - 0.35, 4, 60);
+    }
+
+    attacker.defenseRequestCooldown = 0;
+    triggerWarProcurement(attacker, 1.0);
+
+    const companies = typeof getNationDefenseCompanies === 'function'
+      ? (getNationDefenseCompanies(attacker) || [])
+      : [];
+    if (companies.length > 0 && typeof _produceEquipInternal === 'function' && typeof getNationEquipmentDemand === 'function') {
+      const demand = getNationEquipmentDemand(attacker);
+      const priority = ['tank', 'fighter', 'missile', 'artillery', 'drone', 'ifv', 'rifle'];
+      companies.forEach((company) => {
+        if (!company?.equipment?.length) return;
+        company.researchFocus = priority[Math.floor(Math.random() * Math.min(priority.length, 5))];
+        const choice = [...company.equipment]
+          .filter(eq => priority.includes(eq.cat))
+          .sort((a, b) => {
+            const gapA = Math.max(0, (demand[a.cat] || 0) - (typeof getCategoryInventoryTotal === 'function' ? getCategoryInventoryTotal(attacker, a.cat) : 0));
+            const gapB = Math.max(0, (demand[b.cat] || 0) - (typeof getCategoryInventoryTotal === 'function' ? getCategoryInventoryTotal(attacker, b.cat) : 0));
+            return gapB - gapA;
+          })[0];
+        if (!choice) return;
+        const shortage = Math.max(0, (demand[choice.cat] || 0) - (typeof getCategoryInventoryTotal === 'function' ? getCategoryInventoryTotal(attacker, choice.cat) : 0));
+        const qty = typeof getEquipmentProcurementBatch === 'function'
+          ? getEquipmentProcurementBatch(choice.cat, Math.max(shortage, Math.ceil(shortage * 0.55)), true, attacker)
+          : 0;
+        if (qty > 0) {
+          _produceEquipInternal(company, choice.id, qty, attacker, false);
+        }
+      });
+    }
+
+    const readiness = getNationWarReadinessProfile(attacker, defender, 'conquer');
+    crisis.readiness = readiness;
+    crisis.lastUpdatedTurn = GAME.turn || 0;
+
+    const currentTurn = GAME.turn || 0;
+    if (currentTurn < Number(crisis.earliestWarTurn || 0)) return;
+    if (readiness.hardBlocked || readiness.overallCoverage < 0.62) {
+      if (currentTurn - (crisis.createdTurn || 0) > 28) {
+        crisis.status = 'stalled';
+        addNews(`🧯 MOBILIZATION STALLED: ${attacker.name} cannot sustain a war plan against ${defender.name} and de-escalates.`, 'minor');
+        delete crises[key];
+      }
+      return;
+    }
+
+    const severity = Math.floor(4 + Math.random() * 5);
+    const goal = Math.random() < 0.35 ? 'annex' : (Math.random() < 0.5 ? 'conquer' : 'punish');
+    const launched = declareWar(crisis.attackerId, crisis.defenderId, severity, goal);
+    crisis.attempts = (crisis.attempts || 0) + 1;
+    if (launched) {
+      crisis.status = 'launched';
+      delete crises[key];
+    } else if ((crisis.attempts || 0) > 3) {
+      crisis.earliestWarTurn = currentTurn + 3;
+    }
+  });
+}
+
 function applyBattleEquipmentLosses(nation, totalLoss) {
   const f = nation?.militaryForces;
   if (!f || !totalLoss || totalLoss <= 0) return { total: 0, byType: {} };
@@ -281,6 +560,7 @@ function applyBattleEquipmentLosses(nation, totalLoss) {
 
 function triggerWarProcurement(nation, severity) {
   if (!nation || nation.failedState) return;
+  const isPlayerNation = !!(typeof GAME !== 'undefined' && nation.id === GAME.playerNation?.id);
 
   if (nation.aiBudget && typeof nation.aiBudget === 'object') {
     nation.aiBudget.military = clamp((nation.aiBudget.military || 20) + severity * 0.12, 4, 55);
@@ -288,15 +568,10 @@ function triggerWarProcurement(nation, severity) {
   }
 
   if (typeof getNationDefenseCompanies === 'function' && typeof _produceEquipInternal === 'function') {
-    const forces = nation.militaryForces || {};
-    const activePersonnel = Math.max(0, Number(forces.activePersonnel) || 0);
-    const desiredRifles = Math.floor(activePersonnel * 2000); // 2 rifles per active soldier-equivalent
-
-    const stockpile = nation.militaryStockpile || {};
-    const currentRifles = (stockpile.rifle || []).reduce((sum, it) => sum + (it.quantity || 0), 0);
+    const demandProfile = typeof getNationEquipmentDemand === 'function' ? getNationEquipmentDemand(nation) : {};
 
     const companies = getNationDefenseCompanies(nation) || [];
-    const militarySpend = clamp((nation.aiBudget?.military || 20) / 100, 0.05, 0.7);
+  const militarySpend = clamp(((isPlayerNation ? GAME?.budget?.military : nation.aiBudget?.military) || 20) / 100, 0.05, 0.7);
     const productionPulse = clamp(0.16 + severity * 0.18 + militarySpend * 0.45, 0.18, 0.85);
 
     companies.forEach((company) => {
@@ -310,18 +585,25 @@ function triggerWarProcurement(nation, severity) {
       const heavyPool = candidates.filter((eq) => ['tank', 'fighter', 'destroyer', 'submarine', 'artillery', 'missile'].includes(eq.cat));
 
       let pick = null;
-      if (currentRifles < desiredRifles && riflePool.length > 0 && Math.random() < 0.6) {
+      const rifleShortage = Math.max(0, (demandProfile.rifle || 0) - (typeof getCategoryInventoryTotal === 'function' ? getCategoryInventoryTotal(nation, 'rifle') : 0));
+      if (rifleShortage > 0 && riflePool.length > 0 && Math.random() < 0.6) {
         pick = riflePool[Math.floor(Math.random() * riflePool.length)];
       } else if (heavyPool.length > 0) {
-        pick = heavyPool[Math.floor(Math.random() * heavyPool.length)];
+        heavyPool.sort((a, b) => {
+          const shortageA = Math.max(0, (demandProfile[a.cat] || 0) - (typeof getCategoryInventoryTotal === 'function' ? getCategoryInventoryTotal(nation, a.cat) : 0));
+          const shortageB = Math.max(0, (demandProfile[b.cat] || 0) - (typeof getCategoryInventoryTotal === 'function' ? getCategoryInventoryTotal(nation, b.cat) : 0));
+          return shortageB - shortageA;
+        });
+        pick = heavyPool[0];
       } else {
         pick = candidates[Math.floor(Math.random() * candidates.length)];
       }
 
-      const qty = pick.cat === 'rifle'
-        ? (4 + Math.floor(Math.random() * 10))
-        : (1 + Math.floor(Math.random() * 3));
-      _produceEquipInternal(company, pick.id, qty, nation, false);
+      const shortage = Math.max(0, (demandProfile[pick.cat] || 0) - (typeof getCategoryInventoryTotal === 'function' ? getCategoryInventoryTotal(nation, pick.cat) : 0));
+      const qty = typeof getEquipmentProcurementBatch === 'function'
+        ? getEquipmentProcurementBatch(pick.cat, shortage, true, nation)
+        : 0;
+      if (qty > 0) _produceEquipInternal(company, pick.id, qty, nation, false);
     });
   }
 }
@@ -433,6 +715,16 @@ function evaluateWarDecision(attackerId, defenderId) {
   const b = NATIONS[defenderId];
   if (!a || !b || a.failedState || b.failedState) return { decision: 'none', reason: 'invalid' };
   if (hasActiveTruce(attackerId, defenderId)) return { decision: 'peace', reason: 'active_truce', desire: 0 };
+
+  const readinessProfile = getNationWarReadinessProfile(a, b, 'conquer');
+  if (readinessProfile.hardBlocked) {
+    return {
+      decision: 'crisis',
+      reason: 'insufficient_equipment',
+      desire: 0,
+      readiness: readinessProfile,
+    };
+  }
   
   const aScore = getWarScore(a);
   const bScore = getWarScore(b);
@@ -460,6 +752,9 @@ function evaluateWarDecision(attackerId, defenderId) {
   // Calculate war desire
   let warDesire = aAggression * powerRatio * randomFactor;
   warDesire += (aReadiness - bReadiness) * 0.25;
+  warDesire += (readinessProfile.heavyCoverage - 0.8) * 0.55;
+  warDesire += (readinessProfile.stockpileCoverage - 0.75) * 0.6;
+  warDesire += (readinessProfile.logisticsCoverage - 0.7) * 0.52;
   
   // Desperation can push nations to war (distraction) or peace
   if (aDesperation > 1 && aAggression > 0.6) warDesire += aDesperation * 0.5;
@@ -478,17 +773,20 @@ function evaluateWarDecision(attackerId, defenderId) {
   const alreadyAtWar = GAME.conflicts.some(c => (c.a === attackerId || c.b === attackerId));
   if (alreadyAtWar) warDesire *= 0.3;
 
+  // Sharp declaration downscale when procurement/logistics/stockpile are weak.
+  warDesire *= readinessProfile.declarationFactor;
+
   // Strong deterrence pushes weaker nations into caution.
   if (fearFactor > 0.9 && powerRatio < 1.05) {
     return { decision: 'peace', reason: 'deterrence', desire: warDesire };
   }
   
   if (warDesire > 1.2 && powerRatio > 1.3) {
-    return { decision: 'attack', reason: 'military_advantage', desire: warDesire };
+    return { decision: 'attack', reason: 'military_advantage', desire: warDesire, readiness: readinessProfile };
   } else if (warDesire > 0.8) {
-    return { decision: 'provoke', reason: 'aggressive_posture', desire: warDesire };
+    return { decision: 'provoke', reason: 'aggressive_posture', desire: warDesire, readiness: readinessProfile };
   }
-  return { decision: 'peace', reason: 'no_interest', desire: warDesire };
+  return { decision: 'peace', reason: 'no_interest', desire: warDesire, readiness: readinessProfile };
 }
 
 // ============================================================
@@ -500,6 +798,12 @@ function declareWar(attackerId, defenderId, severity = 5, goal = 'conquer') {
   const b = NATIONS[defenderId];
   if (!a || !b || a.failedState || b.failedState) return false;
   if (hasActiveTruce(attackerId, defenderId)) return false;
+
+  const readinessProfile = getNationWarReadinessProfile(a, b, goal);
+  if (readinessProfile.hardBlocked || readinessProfile.overallCoverage < 0.58) {
+    registerWarMobilizationCrisis(attackerId, defenderId, readinessProfile, 'declare_war_blocked');
+    return false;
+  }
   
   // Check not already in conflict
   if (GAME.conflicts.some(c => (c.a === attackerId && c.b === defenderId) || (c.a === defenderId && c.b === attackerId))) return false;
@@ -520,6 +824,9 @@ function declareWar(attackerId, defenderId, severity = 5, goal = 'conquer') {
   conflict.bMobilization = 50;
   
   GAME.conflicts.push(conflict);
+
+  const crises = ensureWarMobilizationState();
+  delete crises[getWarCrisisKey(attackerId, defenderId)];
   
   // Trigger alliance chain reactions
   triggerAllianceReactions(attackerId, defenderId, severity);
@@ -690,6 +997,8 @@ function resolveBattle(conflict) {
   const a = NATIONS[conflict.a];
   const b = NATIONS[conflict.b];
   if (!a || !b) return;
+  if (!a.militaryForces && typeof initNationMilitaryForces === 'function') initNationMilitaryForces(a);
+  if (!b.militaryForces && typeof initNationMilitaryForces === 'function') initNationMilitaryForces(b);
   
   // Get generals
   assignGeneralsToNation(conflict.a);
@@ -703,6 +1012,12 @@ function resolveBattle(conflict) {
   const bMil = b.militaryPower || 50;
   const aMob = conflict.aMobilization / 100;
   const bMob = conflict.bMobilization / 100;
+  const aActivePersonnel = Number(a.militaryForces?.activePersonnel || 0.1);
+  const bActivePersonnel = Number(b.militaryForces?.activePersonnel || 0.1);
+  const aReservePersonnel = Number(a.militaryForces?.reservePersonnel || 0);
+  const bReservePersonnel = Number(b.militaryForces?.reservePersonnel || 0);
+  const aTraining = Number(a.militaryForces?.trainingQuality || 50);
+  const bTraining = Number(b.militaryForces?.trainingQuality || 50);
   
   // General bonuses
   const aGenBonus = aGen ? (aGen.strategy * 0.3 + aGen.intelligence * 0.2 + (conflict.aGoal === 'defend' ? aGen.defense : aGen.aggression) * 0.3 + aGen.morale * 0.2) / 100 : 0.5;
@@ -720,13 +1035,15 @@ function resolveBattle(conflict) {
   const bEconSupport = (b.gdp || 0.1) * 0.05;
   const aEquipSupport = getActiveEquipmentPower(a) * 0.01;
   const bEquipSupport = getActiveEquipmentPower(b) * 0.01;
+  const aTroopSupport = (aActivePersonnel * (8 + aTraining * 0.07) + aReservePersonnel * (1.6 + aTraining * 0.015)) * (0.55 + aMob * 0.65);
+  const bTroopSupport = (bActivePersonnel * (8 + bTraining * 0.07) + bReservePersonnel * (1.6 + bTraining * 0.015)) * (0.55 + bMob * 0.65);
   
   // Random
   const randomness = 0.5 + Math.random();
   
   // Final power
-  const aPower = (aMil * aMob * aGenBonus + aEconSupport + aEquipSupport) * (1 - aExhaustionPenalty) * (1 + techAdvantage * 0.02) * randomness;
-  const bPower = (bMil * bMob * bGenBonus + bEconSupport + bEquipSupport) * (1 - bExhaustionPenalty) * (1 - techAdvantage * 0.02) * randomness;
+  const aPower = ((aMil * 0.55 + aTroopSupport) * aGenBonus + aEconSupport + aEquipSupport) * (1 - aExhaustionPenalty) * (1 + techAdvantage * 0.02) * randomness;
+  const bPower = ((bMil * 0.55 + bTroopSupport) * bGenBonus + bEconSupport + bEquipSupport) * (1 - bExhaustionPenalty) * (1 - techAdvantage * 0.02) * randomness;
   
   const totalPower = aPower + bPower;
   const aWinChance = totalPower > 0 ? aPower / totalPower : 0.5;
@@ -740,8 +1057,8 @@ function resolveBattle(conflict) {
   // Calculate casualties
   const battleIntensity = conflict.severity / 10;
   const baseCasualties = 500 + Math.floor(Math.random() * 2000 * battleIntensity);
-  const aTroops = (a.militaryForces?.activePersonnel || 0.1) * 1000000;
-  const bTroops = (b.militaryForces?.activePersonnel || 0.1) * 1000000;
+  const aTroops = aActivePersonnel * 1000000;
+  const bTroops = bActivePersonnel * 1000000;
   
   let aCas, bCas;
   if (result === 'a_victory') {
@@ -1015,6 +1332,7 @@ function processAllWars() {
   // Ensure GAME.conflicts is an array
   if (!GAME.conflicts) GAME.conflicts = [];
   processTruceDecay();
+  processWarMobilizationCrises();
   
   const finishedConflicts = [];
 
@@ -1177,8 +1495,11 @@ function processAIWarDecisions() {
     if (evalResult.decision === 'attack') {
       const severity = Math.floor(4 + Math.random() * 5); // 4-8 severity, no border wars
       const goal = Math.random() < 0.3 ? 'annex' : Math.random() < 0.5 ? 'conquer' : 'punish';
-      declareWar(attackerId, defenderId, severity, goal);
-      warsDeclared++;
+      if (declareWar(attackerId, defenderId, severity, goal)) {
+        warsDeclared++;
+      }
+    } else if (evalResult.decision === 'crisis') {
+      registerWarMobilizationCrisis(attackerId, defenderId, evalResult.readiness, evalResult.reason || 'insufficient_readiness');
     } else if (evalResult.decision === 'provoke' && Math.random() < 0.4) {
       // Diplomatic pressure instead of border skirmish warfare
       if (typeof getRelationBetween === 'function') {
