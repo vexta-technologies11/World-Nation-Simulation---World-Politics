@@ -11,6 +11,8 @@ const GAME = {
   speed: 0, // 0 = paused, 1, 2, 5, 10
   running: false,
   timer: null,
+  turnInProgress: false,
+  timerGeneration: 0,
   date: new Date(2025, 5, 1), // June 2025
 
   treasury: 150000, // in millions ($150B starting reserve)
@@ -491,9 +493,7 @@ function buildNations() {
 const NATIONS = buildNations();
 const PLAYER_ID = Object.keys(NATIONS).find(id => NATIONS[id].iso2 === PLAYER_ISO2) || Object.keys(NATIONS)[0];
 
-GAME.playerNation = {
-  ...GAME.playerNation,
-  ...NATIONS[PLAYER_ID],
+GAME.playerNation = Object.assign({}, GAME.playerNation, NATIONS[PLAYER_ID], {
   leader: 'James Holloway',
   leaderType: 'Elected President',
   governmentStyle: 'federal_republic',
@@ -502,8 +502,10 @@ GAME.playerNation = {
   aiBudget: doctrineBaseBudget('education-first'),
   leaderTraits: ['Pragmatist', 'Economist'],
   traits: ['Pragmatist', 'Economist'],
-  leaderTerm: '2025-2029',
-};
+  leaderTerm: '2025-2029'
+});
+window.NATIONS = NATIONS;
+window.GAME = GAME;
 
 // Events list for simulation
 const EVENTS_POOL = [
@@ -639,9 +641,41 @@ function formatDate(date) {
   return `${MONTHS[date.getMonth()]} ${date.getFullYear()}`;
 }
 
+function safeRun(label, fn, fallback = undefined) {
+  try {
+    return fn();
+  } catch (error) {
+    console.error(`${label} failed:`, error);
+    return fallback;
+  }
+}
+
 function formatMoney(m) {
-  if (m >= 1000) return '$' + (m / 1000).toFixed(1) + 'T';
-  return '$' + Math.round(m) + 'M';
+  return formatHumanMoneyMillions(m);
+}
+
+function formatHumanNumber(value, decimals = 1) {
+  const num = Number(value || 0);
+  if (!Number.isFinite(num)) return '0';
+  const abs = Math.abs(num);
+  const sign = num < 0 ? '-' : '';
+  if (abs >= 1_000_000_000_000) return sign + (abs / 1_000_000_000_000).toFixed(decimals) + ' Trillion';
+  if (abs >= 1_000_000_000) return sign + (abs / 1_000_000_000).toFixed(decimals) + ' Billion';
+  if (abs >= 1_000_000) return sign + (abs / 1_000_000).toFixed(decimals) + ' Million';
+  if (abs >= 1_000) return sign + (abs / 1_000).toFixed(decimals) + ' Thousand';
+  return sign + abs.toFixed(abs >= 100 ? 0 : decimals);
+}
+
+function formatHumanMoneyMillions(valueM, decimals = 1) {
+  const num = Number(valueM || 0);
+  if (!Number.isFinite(num)) return '$0';
+  return '$' + formatHumanNumber(num * 1_000_000, decimals);
+}
+
+function formatHumanTrillions(valueT, decimals = 2) {
+  const num = Number(valueT || 0);
+  if (!Number.isFinite(num)) return '$0';
+  return '$' + formatHumanNumber(num * 1_000_000_000_000, decimals);
 }
 
 function clamp(value, min, max) {
@@ -1482,6 +1516,23 @@ function aiAdjustNationStrategy(nation, nationId) {
   }
 
   // Strong alliances: reduce military need
+    // Education deficit: invest in social/education
+    if (nation.education < 40) {
+      target.social = clamp(target.social + 10, 4, 40);
+      target.military = clamp(target.military - 5, 4, 45);
+      target.space = clamp(target.space - 4, 2, 20);
+    }
+
+    // Strict spending rule: if edu spend below minimum viable threshold, force social investment
+    const _eduSpend = (nation.eduState && nation.eduState.spendGDP != null)
+      ? nation.eduState.spendGDP
+      : (nation.aiBudget ? nation.aiBudget.social * 0.112 : 0);
+    if (_eduSpend < 2.0 && nation.education < 80) {
+      target.social = clamp(target.social + 8, 4, 42);
+      target.military = clamp(target.military - 4, 4, 45);
+    }
+
+    // Strong alliances: reduce military need
   if (allianceSupport > 0.6) {
     target.diplomacy = clamp(target.diplomacy + 5, 4, 25);
     target.military = clamp(target.military - 4, 4, 45);
@@ -1744,10 +1795,13 @@ function recordHistorySnapshot() {
 
 function formatMetricDisplay(metric, value) {
   if (!Number.isFinite(value)) return '--';
-  if (metric === 'gdp') return `$${value.toFixed(2)}T`;
+  if (metric === 'gdp') return formatHumanTrillions(value, 2);
   if (metric === 'renewableShare' || metric === 'inflation' || metric === 'debtRatio' || metric === 'deficit') return `${value.toFixed(1)}%`;
   if (metric === 'recessionMonths') return `${Math.round(value)}`;
   if (metric === 'techsDiscovered') return `${Math.round(value)}`;
+  if (metric === 'factories' || metric === 'resources' || metric === 'stockMarket' || metric === 'militaryPower' || metric === 'education' || metric === 'governance' || metric === 'infrastructure' || metric === 'health' || metric === 'environment' || metric === 'energySecurity' || metric === 'stability' || metric === 'happiness' || metric === 'resilience') {
+    return formatHumanNumber(value, 1);
+  }
   return `${value.toFixed(1)}`;
 }
 
@@ -1856,8 +1910,11 @@ function runCountrySystemModel(nation, isPlayer = false, nationId = null) {
 
   // ── INNOVATION ENGINE ──────────────────────────────────
   // Innovation is driven by education, tech level, infrastructure, governance,
-  // and budget for intel/space. High religion influences reduce it slightly
-  // (less secular scientific investment in traditional societies).
+  // and budget for intel/space. High religion influences reduce it slightly.
+  // University R&D adds a modest bonus on top.
+  const uniRDBonus = (typeof getEducationRDMultiplier === 'function')
+    ? clamp((getEducationRDMultiplier(nation) - 1.0) * 0.015, -0.005, 0.04)
+    : 0;
   const innovationEngine = (
     nation.education * 0.2 +
     nation.techLevel * 8 +
@@ -1865,7 +1922,7 @@ function runCountrySystemModel(nation, isPlayer = false, nationId = null) {
     nation.governance * 0.09 +
     intlPct * 0.35 +
     spacePct * 0.3
-  ) / 100 * (1 - religionEducationPenalty);
+  ) / 100 * (1 - religionEducationPenalty) + uniRDBonus;
 
   // ── PRODUCTIVITY ENGINE ────────────────────────────────
   const productivityEngine = (
@@ -1878,79 +1935,87 @@ function runCountrySystemModel(nation, isPlayer = false, nationId = null) {
   ) / 100;
 
   // ── POPULATION ────────────────────────────────────────
-  const fertilityPressure = clamp((nation.religionInfluence - 52) * 0.0015 + (40 - nation.education) * 0.0018, -0.02, 0.06);
-  const jobsPressure = clamp((nation.jobs - 58) * 0.0007, -0.03, 0.02);
+  // Realistic: ~0.5-1.5% annual growth = ~0.04-0.12% monthly
+  const fertilityPressure = clamp((nation.religionInfluence - 52) * 0.0008 + (40 - nation.education) * 0.0009, -0.01, 0.03);
+  const jobsPressure = clamp((nation.jobs - 58) * 0.0004, -0.015, 0.01);
   nation.population = clamp(
-    nation.population + 0.035 + fertilityPressure + jobsPressure + (nation.health - 50) * 0.0025 + rand(0.09),
+    nation.population * (1 + 0.0008 + fertilityPressure + jobsPressure + (nation.health - 50) * 0.00015) + rand(0.05),
     1, 1800
   );
 
   // ── FACTORIES ─────────────────────────────────────────
-  // Good environment supports sustainable industry. Booms accelerate factory building.
+  // DIMINISHING RETURNS: building factories gets harder as industrial base saturates
+  const factoryDiminish = clamp(1.0 - (nation.factories / 100) * 0.88, 0.12, 1.0);
   nation.factories = clamp(
     nation.factories +
-    (nation.infrastructure - 50) * 0.012 +
-    (nation.resources - 50) * 0.006 +
-    econ * 1.6 +
-    (isBooming ? 0.3 : 0) -
-    warPressure * 0.25 -
-    (nation.environment < 35 ? 0.18 : 0) +
-    rand(0.24),
+    ((nation.infrastructure - 50) * 0.006 +
+     (nation.resources - 50) * 0.003 +
+     econ * 0.6 +
+     (isBooming ? 0.15 : 0) -
+     warPressure * 0.12 -
+     (nation.environment < 35 ? 0.1 : 0)) * factoryDiminish +
+    rand(0.12),
     1, 100
   );
 
   // ── JOBS ──────────────────────────────────────────────
+  // DIMINISHING RETURNS: harder to create jobs when employment is already high
+  const jobsDiminish = clamp(1.0 - (nation.jobs / 100) * 0.88, 0.12, 1.0);
   nation.jobs = clamp(
     nation.jobs +
-    (nation.factories - 50) * 0.018 +
-    (nation.gdp > 5 ? 0.12 : -0.16) -
-    (nation.population > 280 ? 0.16 : 0) -
-    warPressure * 0.35 +
-    econ * 1.1 +
-    social * 0.45 +
-    (isBooming ? 0.5 : 0) +
-    rand(0.32),
+    ((nation.factories - 50) * 0.008 +
+     (nation.gdp > 5 ? 0.06 : -0.08) -
+     (nation.population > 280 ? 0.08 : 0) -
+     warPressure * 0.18 +
+     econ * 0.4 +
+     social * 0.18 +
+     (isBooming ? 0.25 : 0)) * jobsDiminish +
+    rand(0.16),
     1, 100
   );
 
   // ── MILITARY POWER ────────────────────────────────────
+  // DIMINISHING RETURNS: harder to improve military when already powerful
+  const milDiminish = clamp(1.0 - (nation.militaryPower / 100) * 0.85, 0.15, 1.0);
   nation.militaryPower = clamp(
     nation.militaryPower +
-    (nation.gdp / 120) * 0.25 +
-    (nation.stability - 50) * 0.006 +
-    military * 1.05 +
-    rand(0.24),
+    ((nation.gdp / 120) * 0.12 +
+     (nation.stability - 50) * 0.003 +
+     military * 0.4) * milDiminish +
+    rand(0.12),
     1, 100
   );
 
   // ── TECH LEVEL ────────────────────────────────────────
+  // DIMINISHING RETURNS: harder to advance as tech level rises
+  // Real-world: going from T1→T3 takes decades, T8→T9 takes generations
+  const techDiminish = clamp(1.0 - (nation.techLevel / 10) * 0.92, 0.08, 1.0);
   nation.techLevel = clamp(
     nation.techLevel +
-    innovationEngine * 0.028 +
-    (space + intel) * 0.028 -
-    religionDrag * 0.3 -
-    (nation.education < 35 ? 0.006 : 0) +
-    rand(0.006),
+    (innovationEngine * 0.012 + (space + intel) * 0.008) * techDiminish -
+    religionDrag * 0.15 -
+    (nation.education < 35 ? 0.003 : 0) +
+    rand(0.003),
     1, 10
   );
 
-  // ── EDUCATION ─────────────────────────────────────────
-  // Education grows with governance and social budget.
-  // Dictatorships/authoritarian states suppress education.
-  // High religion influence slows education growth in traditional societies.
-  // Good environment attracts educated workforce.
-  nation.education = clamp(
-    nation.education +
-    (nation.governance - 50) * 0.006 +
-    social * 0.95 +
-    (nation.environment > 55 ? 0.05 : 0) +
-    (isBooming ? 0.08 : 0) -
-    (nation.governmentStyle === 'dictatorship' ? 0.18 : 0) -
-    (nation.governmentStyle === 'authoritarian_state' ? 0.1 : 0) -
-    (nation.religionInfluence > 72 ? 0.1 : 0) +
-    rand(0.32),
-    1, 100
-  );
+  // ── EDUCATION (managed by education.js) ───────────────────
+  // 3-tier pipeline: Primary → Secondary → Tertiary
+  // Spending strictly enforced; gov type caps; brain drain; university R&D
+  if (typeof runEducationTurn === 'function') {
+    runEducationTurn(nation, id, sourceBudget);
+  } else {
+    const eduDiminish = clamp(1.0 - (nation.education / 100) * 0.9, 0.1, 1.0);
+    nation.education = clamp(
+      nation.education +
+      ((nation.governance - 50) * 0.003 + social * 0.35 +
+       (nation.environment > 55 ? 0.03 : 0) + (isBooming ? 0.04 : 0) -
+       (nation.governmentStyle === 'dictatorship' ? 0.12 : 0) -
+       (nation.governmentStyle === 'authoritarian_state' ? 0.06 : 0) -
+       (nation.religionInfluence > 72 ? 0.06 : 0)) * eduDiminish + rand(0.15),
+      1, 100
+    );
+  }
 
   // ── RELIGION INFLUENCE ────────────────────────────────
   // Religion grows where education is low and governance is weak.
@@ -1966,13 +2031,15 @@ function runCountrySystemModel(nation, isPlayer = false, nationId = null) {
   );
 
   // ── INFRASTRUCTURE ────────────────────────────────────
+  // DIMINISHING RETURNS: building roads in a developed country is maintenance, not growth
+  const infraDiminish = clamp(1.0 - (nation.infrastructure / 100) * 0.88, 0.12, 1.0);
   nation.infrastructure = clamp(
     nation.infrastructure +
-    (nation.gdp / 220) +
-    (nation.resources - 50) * 0.005 +
-    econ * 1.1 -
-    warPressure * 0.2 +
-    rand(0.26),
+    ((nation.gdp / 220) +
+     (nation.resources - 50) * 0.003 +
+     econ * 0.4 -
+     warPressure * 0.1) * infraDiminish +
+    rand(0.13),
     1, 100
   );
 
@@ -1988,110 +2055,109 @@ function runCountrySystemModel(nation, isPlayer = false, nationId = null) {
   );
 
   // ── GOVERNANCE ────────────────────────────────────────
-  // Education improves governance (educated populace demands better institutions).
-  // Inequality and corruption degrade governance.
-  // Religion influence beyond moderate levels can reduce governance in secular models.
+  // DIMINISHING RETURNS: institutional reform is slow and hard
+  const govDiminish = clamp(1.0 - (nation.governance / 100) * 0.9, 0.1, 1.0);
   const religionGovernancePenalty = (nation.religionInfluence > 70 && (nation.governmentStyle === 'liberal_democracy' || nation.governmentStyle === 'federal_republic'))
-    ? clamp((nation.religionInfluence - 70) * 0.02, 0, 0.5)
+    ? clamp((nation.religionInfluence - 70) * 0.01, 0, 0.3)
     : 0;
   nation.governance = clamp(
     nation.governance +
-    (nation.education - 50) * 0.006 -
-    (nation.inequality - 50) * 0.007 +
-    (diplomacy + social) * 0.22 -
-    (nation.corruption - 50) * 0.005 -
-    religionGovernancePenalty +
-    rand(0.2),
+    ((nation.education - 50) * 0.003 -
+     (nation.inequality - 50) * 0.004 +
+     (diplomacy + social) * 0.08 -
+     (nation.corruption - 50) * 0.003 -
+     religionGovernancePenalty) * govDiminish +
+    rand(0.1),
     1, 100
   );
 
   // ── HEALTH ────────────────────────────────────────────
+  // DIMINISHING RETURNS: basic healthcare is cheap, advanced medicine is expensive
+  const healthDiminish = clamp(1.0 - (nation.health / 100) * 0.88, 0.12, 1.0);
   nation.health = clamp(
     nation.health +
-    (nation.environment - 50) * 0.009 +
-    (nation.infrastructure - 50) * 0.007 -
-    (nation.inflation - 4) * 0.15 +
-    social * 0.55 +
-    rand(0.28),
+    ((nation.environment - 50) * 0.005 +
+     (nation.infrastructure - 50) * 0.004 -
+     (nation.inflation - 4) * 0.08 +
+     social * 0.2) * healthDiminish +
+    rand(0.14),
     1, 100
   );
 
   // ── RENEWABLE SHARE ──────────────────────────────────
+  // DIMINISHING: first 30% is easy (wind/solar), last 30% is very hard (grid storage)
+  const renewDiminish = clamp(1.0 - (nation.renewableShare / 100) * 0.85, 0.15, 1.0);
   nation.renewableShare = clamp(
     nation.renewableShare +
-    (nation.techLevel - 5) * 0.16 +
-    (econ + space) * 0.45 +
-    rand(0.22),
+    ((nation.techLevel - 5) * 0.08 +
+     (econ + space) * 0.18) * renewDiminish +
+    rand(0.11),
     2, 96
   );
 
   // ── ENVIRONMENT ───────────────────────────────────────
-  // Economic growth and military power degrade environment (industrialization cost).
-  // Renewables and social spending help restore it.
-  // Education helps people prioritize environmental protection.
-  // High GDP + low renewables = environmental damage.
+  // DIMINISHING: cleaning up the last 10% of pollution is exponentially harder
+  const envDiminish = clamp(1.0 - (nation.environment / 100) * 0.85, 0.15, 1.0);
   nation.environment = clamp(
-    nation.environment -
-    (nation.gdp / 95) * 0.18 * (1 - nation.renewableShare / 100 * 0.5) -
-    (nation.militaryPower / 100) * 0.12 +
-    (nation.renewableShare / 100) * 0.55 +
-    social * 0.12 +
-    (nation.education > 55 ? 0.08 : 0) +
-    rand(0.28),
+    nation.environment +
+    (-(nation.gdp / 95) * 0.09 * (1 - nation.renewableShare / 100 * 0.5) -
+     (nation.militaryPower / 100) * 0.06 +
+     (nation.renewableShare / 100) * 0.28 +
+     social * 0.05 +
+     (nation.education > 55 ? 0.04 : 0)) * envDiminish +
+    rand(0.14),
     1, 100
   );
 
   // ── ENERGY SECURITY ───────────────────────────────────
+  // DIMINISHING: energy independence gets harder as you approach 100%
+  const energyDiminish = clamp(1.0 - (nation.energySecurity / 100) * 0.88, 0.12, 1.0);
   nation.energySecurity = clamp(
     nation.energySecurity +
-    (nation.renewableShare - 35) * 0.02 +
-    (nation.infrastructure - 50) * 0.007 +
-    (econ + space) * 0.3 +
-    rand(0.24),
+    ((nation.renewableShare - 35) * 0.01 +
+     (nation.infrastructure - 50) * 0.004 +
+     (econ + space) * 0.12) * energyDiminish +
+    rand(0.12),
     1, 100
   );
 
   // ── INFLATION ─────────────────────────────────────────
-  // Booms can cause inflation pressure. Recessions reduce it.
+  // Slower drift — inflation doesn't jump 5% in a month
   nation.inflation = clamp(
     nation.inflation +
-    (nation.debtRatio - 65) * 0.0055 -
-    (nation.governance - 50) * 0.0048 -
-    (nation.energySecurity - 50) * 0.0025 +
-    Math.max(0, nation.deficit) * 0.012 +
-    (GAME.marketCrashTurns > 0 ? 0.08 : -0.01) +
-    warPressure * 0.025 +
-    military * 0.08 +
-    (isBooming ? 0.06 : isRecession ? -0.04 : 0) +
-    rand(0.24),
+    (nation.debtRatio - 65) * 0.0025 -
+    (nation.governance - 50) * 0.002 -
+    (nation.energySecurity - 50) * 0.001 +
+    Math.max(0, nation.deficit) * 0.006 +
+    (GAME.marketCrashTurns > 0 ? 0.04 : -0.005) +
+    warPressure * 0.012 +
+    military * 0.04 +
+    (isBooming ? 0.03 : isRecession ? -0.02 : 0) +
+    rand(0.12),
     0.2, 45
   );
 
   // ── DEBT RATIO ────────────────────────────────────────
-  // Debt now driven by deficit from economic-system.js (revenue vs spending)
-  // This is a small natural drift + deficit contribution
   nation.debtRatio = clamp(
     nation.debtRatio +
-    Math.max(0, nation.deficit) * 0.08 +
-    (nation.inflation > 8 ? 0.2 : 0) +
-    (nation.inCrisis ? 0.3 : 0) -
-    (nation.gdp > 10 ? 0.05 : 0) -
-    (nation.governance - 50) * 0.005 +
-    rand(0.12),
+    Math.max(0, nation.deficit) * 0.04 +
+    (nation.inflation > 8 ? 0.1 : 0) +
+    (nation.inCrisis ? 0.15 : 0) -
+    (nation.gdp > 10 ? 0.03 : 0) -
+    (nation.governance - 50) * 0.003 +
+    rand(0.06),
     8, 260
   );
 
   // ── CORRUPTION ────────────────────────────────────────
-  // Strong governance + education + transparency reduce corruption.
-  // Recessions and crises breed corruption.
   nation.corruption = clamp(
     nation.corruption +
-    (55 - nation.governance) * 0.01 +
-    (nation.recessionMonths > 6 ? 0.06 : -0.03) +
-    (nation.inCrisis ? 0.08 : 0) -
-    allianceSupport * 0.04 +
-    (nation.education > 55 ? -0.03 : 0) +
-    rand(0.26),
+    (55 - nation.governance) * 0.005 +
+    (nation.recessionMonths > 6 ? 0.03 : -0.015) +
+    (nation.inCrisis ? 0.04 : 0) -
+    allianceSupport * 0.02 +
+    (nation.education > 55 ? -0.015 : 0) +
+    rand(0.13),
     1, 100
   );
 
@@ -2589,7 +2655,7 @@ function initNationResearch(nation) {
 
 // Generate research points per turn for a nation
 function computeNationResearchPerTurn(nation) {
-  if (nation.failedState) return 0.5;
+  if (nation.failedState) return 0.3;
   
   const eduFactor = clamp(nation.education / 50, 0.1, 2.5);
   const govFactor = clamp(nation.governance / 50, 0.2, 2.0);
@@ -2609,12 +2675,16 @@ function computeNationResearchPerTurn(nation) {
   // Synergy: high education + high governance = research powerhouse
   const synergyBonus = (nation.education > 60 && nation.governance > 55) ? 1.3 : 1.0;
   
-  const basePoints = 1.5 + eduFactor * 2.5 + govFactor * 1.0 + techFactor * 2.0 + infraFactor * 0.8;
-  const budgetPoints = budgetFactor * 3.0;
+  // DIMINISHING RETURNS: more techs discovered = harder to discover new ones
+  const discoveredCount = (nation.research?.discoveredTechs?.length || 0) + (nation.research?.purchasedTechs?.length || 0);
+  const discoveryDiminish = clamp(1.0 - (discoveredCount / 500) * 0.7, 0.3, 1.0);
+  
+  const basePoints = 0.8 + eduFactor * 1.2 + govFactor * 0.5 + techFactor * 1.0 + infraFactor * 0.4;
+  const budgetPoints = budgetFactor * 1.5;
   
   return clamp(
-    (basePoints + budgetPoints) * envBonus * synergyBonus * (1 - religionDrag),
-    0.5, 35
+    (basePoints + budgetPoints) * envBonus * synergyBonus * (1 - religionDrag) * discoveryDiminish,
+    0.3, 18
   ) * (nation.inCrisis ? 0.4 : 1.0) * (nation.recessionMonths > 6 ? 0.7 : 1.0);
 }
 
@@ -2872,11 +2942,19 @@ function getNationHighestTechTier(nation) {
 // UPDATE HUD
 // ============================================================
 function updateHUD() {
-  dom.treasuryVal.textContent = GAME.treasury;
-  dom.approvalVal.textContent = GAME.approval;
-  dom.threatVal.textContent = GAME.threatLevel;
-  dom.dateDisplay.textContent = formatDate(GAME.date);
-  dom.turnVal.textContent = GAME.turn;
+  if (dom.treasuryVal) dom.treasuryVal.textContent = GAME.treasury;
+  if (dom.approvalVal) dom.approvalVal.textContent = GAME.approval;
+  if (dom.threatVal) dom.threatVal.textContent = GAME.threatLevel;
+  if (dom.dateDisplay) dom.dateDisplay.textContent = formatDate(GAME.date);
+  if (dom.turnVal) dom.turnVal.textContent = GAME.turn;
+}
+
+function refreshSimulationUi() {
+  safeRun('syncPlayerNationFromRecord', () => syncPlayerNationFromRecord());
+  safeRun('updateHUD', () => updateHUD());
+  safeRun('renderNationCard', () => renderNationCard());
+  safeRun('renderMap', () => renderMap());
+  safeRun('refreshRealtimeTabs', () => refreshRealtimeTabs());
 }
 
 // ── AI TECH TRADING ────────────────────────────────────
@@ -3026,8 +3104,8 @@ function simulateTurn() {
     );
   }
 
-  syncPlayerNationFromRecord();
-  recordHistorySnapshot();
+  safeRun('syncPlayerNationFromRecord', () => syncPlayerNationFromRecord());
+  safeRun('recordHistorySnapshot', () => recordHistorySnapshot());
 
   // Threat level adjustment
   if (GAME.threatLevel === 'High' && Math.random() < 0.2) GAME.threatLevel = 'Medium';
@@ -3038,37 +3116,88 @@ function simulateTurn() {
     else if (player.stability < 48 || player.inflation > 9 || player.debtRatio > 110 || GAME.marketCrashTurns > 0) GAME.threatLevel = 'Medium';
   }
 
-  updateHUD();
-  renderNationCard();
-  renderMap();
-  refreshRealtimeTabs();
+  refreshSimulationUi();
 }
 
 // ============================================================
 // SPEED CONTROLS
 // ============================================================
+function stopSimulationTimer() {
+  GAME.timerGeneration += 1;
+  if (GAME.timer) {
+    clearTimeout(GAME.timer);
+    GAME.timer = null;
+  }
+}
+
+function getSimulationInterval(speed) {
+  return Math.max(200, 2000 / speed);
+}
+
+function scheduleNextTurn() {
+  stopSimulationTimer();
+  if (!GAME.running || GAME.speed <= 0) return;
+
+  const interval = getSimulationInterval(GAME.speed);
+  const generation = GAME.timerGeneration;
+  GAME.timer = setTimeout(() => runScheduledTurn(generation), interval);
+}
+
+function safelySimulateTurn() {
+  try {
+    simulateTurn();
+    return true;
+  } catch (error) {
+    console.error('Simulation turn failed:', error);
+    refreshSimulationUi();
+    return false;
+  }
+}
+
+function runScheduledTurn(generation) {
+  if (generation !== GAME.timerGeneration) return;
+
+  if (!GAME.running || GAME.speed <= 0 || GAME.turnInProgress) {
+    scheduleNextTurn();
+    return;
+  }
+
+  GAME.turnInProgress = true;
+  try {
+    safelySimulateTurn();
+  } finally {
+    GAME.turnInProgress = false;
+    scheduleNextTurn();
+  }
+}
+
+function setSimulationSpeed(speed) {
+  GAME.speed = speed;
+  GAME.running = speed > 0;
+  stopSimulationTimer();
+
+  if (!GAME.running) return;
+
+  if (!GAME.turnInProgress) {
+    GAME.turnInProgress = true;
+    try {
+      safelySimulateTurn();
+    } finally {
+      GAME.turnInProgress = false;
+    }
+  }
+
+  scheduleNextTurn();
+}
+
 function setupSpeedControls() {
   $$('.speed-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const speed = parseInt(btn.dataset.speed);
-      GAME.speed = speed;
       $$('.speed-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
 
-      if (GAME.timer) {
-        clearInterval(GAME.timer);
-        GAME.timer = null;
-      }
-
-      if (speed > 0) {
-        GAME.running = true;
-        const interval = Math.max(200, 2000 / speed);
-        GAME.timer = setInterval(simulateTurn, interval);
-        // Run first turn immediately
-        simulateTurn();
-      } else {
-        GAME.running = false;
-      }
+      setSimulationSpeed(speed);
     });
   });
 }
@@ -3712,10 +3841,7 @@ function setupMapControls() {
 
 // ─── FORMAT MONEY HELPER ──────────────────────────────
 function formatMoney(val) {
-  if (!Number.isFinite(val)) return '$0';
-  if (val >= 1000000) return '$' + (val / 1000000).toFixed(2) + 'T';
-  if (val >= 1000) return '$' + (val / 1000).toFixed(1) + 'B';
-  return '$' + Math.round(val) + 'M';
+  return formatHumanMoneyMillions(val);
 }
 
 // ============================================================
@@ -3795,11 +3921,7 @@ function renderNationCard() {
     ? getNationStockMarketSnapshot(sourceNation)
     : { listed: 0, marketCap: 0, topGainer: null, topLoser: null };
   const formatMarketMoneyCard = (amountM) => {
-    const v = Number(amountM || 0);
-    if (!Number.isFinite(v)) return '$0M';
-    if (v >= 1000000) return '$' + (v / 1000000).toFixed(2) + 'T';
-    if (v >= 1000) return '$' + (v / 1000).toFixed(2) + 'B';
-    return '$' + v.toFixed(1) + 'M';
+    return formatHumanMoneyMillions(amountM, 2);
   };
   const card = $('#nationCard');
   card.innerHTML = `
@@ -3815,13 +3937,13 @@ function renderNationCard() {
       <div class="stat-row"><span class="stat-label">Budget: Intel</span><span class="stat-val">${budgetIntel}%</span></div>
       <div class="stat-row"><span class="stat-label">Budget: Space</span><span class="stat-val">${budgetSpace}%</span></div>
       <div class="stat-row"><span class="stat-label">Budget: Social</span><span class="stat-val">${budgetSocial}%</span></div>
-      <div class="stat-row"><span class="stat-label">GDP</span><span class="stat-val">$${gdpVal.toFixed(1)}T</span></div>
+      <div class="stat-row"><span class="stat-label">GDP</span><span class="stat-val">${formatHumanTrillions(gdpVal, 2)}</span></div>
       <div class="stat-row"><span class="stat-label">Treasury</span><span class="stat-val" style="color:var(--accent-yellow)">${formatMoney(treasuryVal)}</span></div>
-      <div class="stat-row"><span class="stat-label">Tax Revenue</span><span class="stat-val" style="color:var(--accent-green)">${formatMoney(Math.round(taxRevenueVal))}/m</span></div>
+      <div class="stat-row"><span class="stat-label">Tax Revenue</span><span class="stat-val" style="color:var(--accent-green)">${formatMoney(Math.round(taxRevenueVal))}/month</span></div>
       <div class="stat-row"><span class="stat-label">Corporate Earnings</span><span class="stat-val" style="color:var(--accent-blue)">${formatMoney(corporateEarningsVal)}</span></div>
       <div class="stat-row"><span class="stat-label">Informal Economy</span><span class="stat-val ${informalEconomyVal > 30 ? 'negative' : 'positive'}">${informalEconomyVal.toFixed(1)}%</span></div>
       <div class="stat-row"><span class="stat-label">Companies</span><span class="stat-val">${(sourceNation.companies || []).length}</span></div>
-      <div class="stat-row"><span class="stat-label">Population</span><span class="stat-val">${Math.round(populationVal)}M</span></div>
+      <div class="stat-row"><span class="stat-label">Population</span><span class="stat-val">${formatHumanNumber(populationVal * 1_000_000, 1)}</span></div>
       <div class="stat-row"><span class="stat-label">Military</span><span class="stat-val"><span class="bar-fill" style="width:${Math.round(militaryPowerVal)}%">${Math.round(militaryPowerVal)}</span></span></div>
       <div class="stat-row"><span class="stat-label">Tech Avg</span><span class="stat-val">T${techLevelVal.toFixed(1)}</span></div>
       <div class="stat-row"><span class="stat-label">Technologies</span><span class="stat-val" style="color:var(--accent-blue)">${countNationTechs(p)}</span></div>
@@ -3831,10 +3953,10 @@ function renderNationCard() {
       <div class="stat-row"><span class="stat-label">Resources</span><span class="stat-val">${resourcesVal.toFixed(1)}</span></div>
       <div class="stat-row"><span class="stat-label">Energy Security</span><span class="stat-val">${energySecurityVal.toFixed(1)}</span></div>
       <div class="stat-row"><span class="stat-label">Oil / Minerals / RareEarth</span><span class="stat-val">${Number.isFinite(oilLevel) ? oilLevel.toFixed(1) : '-'} / ${Number.isFinite(mineralsLevel) ? mineralsLevel.toFixed(1) : '-'} / ${Number.isFinite(rareEarthLevel) ? rareEarthLevel.toFixed(1) : '-'}</span></div>
-      <div class="stat-row"><span class="stat-label">Supply Chain</span><span class="stat-val ${supplyBalance >= 0 ? 'positive' : 'negative'}">${supplyState} (${Math.round(supplyBalance)}M)</span></div>
+      <div class="stat-row"><span class="stat-label">Supply Chain</span><span class="stat-val ${supplyBalance >= 0 ? 'positive' : 'negative'}">${supplyState} (${formatHumanMoneyMillions(supplyBalance)})</span></div>
       <div class="stat-row"><span class="stat-label">Inflation</span><span class="stat-val">${inflationVal.toFixed(1)}%</span></div>
       <div class="stat-row"><span class="stat-label">Debt/GDP</span><span class="stat-val">${debtRatioVal.toFixed(1)}%</span></div>
-      <div class="stat-row"><span class="stat-label">Factories</span><span class="stat-val">${factoriesVal.toFixed(1)}</span></div>
+      <div class="stat-row"><span class="stat-label">Factories</span><span class="stat-val">${formatHumanNumber(factoriesVal, 1)}</span></div>
       <div class="stat-row"><span class="stat-label">Jobs</span><span class="stat-val ${jobsVal >= 55 ? 'positive' : 'negative'}">${jobsVal.toFixed(1)}</span></div>
       <div class="stat-row"><span class="stat-label">Religiosity</span><span class="stat-val ${religionInfluenceVal <= 60 ? 'positive' : 'negative'}">${religionInfluenceVal.toFixed(1)}</span></div>
       <div class="stat-row"><span class="stat-label">Stock Index</span><span class="stat-val">${stockMarketVal.toFixed(1)}</span></div>
@@ -3859,61 +3981,13 @@ function renderNationCard() {
         ? `<div class="stat-row"><span class="stat-label">Approval</span><span class="stat-val">${GAME.approval}%</span></div>`
         : `<div class="stat-row"><span class="stat-label">Relation</span><span class="stat-val ${relation >= 0 ? 'positive' : 'negative'}">${relation >= 0 ? '+' : ''}${relation}</span></div>`}
     </div>
-    ${(() => {
-      const comps = sourceNation.companies || [];
-      if (comps.length === 0) return '';
-      const portfolio = sourceNation.populationPortfolio || { dividendReceived: 0, totalInvested: 0, stockHoldings: {} };
-      const listedCount = comps.filter(c => c.public).length;
-      const outgoingInvestments = sourceNation.companyInvestments || {};
-      const top = comps.slice().sort((a,b) => {
-        const aw = Number(a.worth || (Number(a.revenue || 0) * Number(a.profitMargin || 0) * 20));
-        const bw = Number(b.worth || (Number(b.revenue || 0) * Number(b.profitMargin || 0) * 20));
-        return bw - aw;
-      }).slice(0, 10);
-      let h = '<div class="section-card" style="margin:8px 0;padding:6px 8px;font-size:11px"><div style="font-weight:600;font-size:12px;margin-bottom:4px">🏢 Companies (' + comps.length + ')</div>';
-      h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:4px;margin-bottom:6px">';
-      h += '<div class="resource-item"><span class="r-name">Listed</span><span class="r-val">' + listedCount + '</span></div>';
-      h += '<div class="resource-item"><span class="r-name">Citizen Invested</span><span class="r-val" style="color:var(--accent-blue)">' + formatMarketMoneyCard(portfolio.totalInvested) + '</span></div>';
-      h += '<div class="resource-item"><span class="r-name">Citizen Dividend</span><span class="r-val" style="color:var(--accent-green)">' + formatMarketMoneyCard(portfolio.dividendReceived) + '</span></div>';
-      h += '<div class="resource-item"><span class="r-name">Local Market Cap</span><span class="r-val" style="color:var(--accent-yellow)">' + formatMarketMoneyCard(localStockSnapshot.marketCap) + '</span></div>';
-      h += '</div>';
-      top.forEach((c, i) => {
-        const sectorIcon = ({agriculture:'🌾',manufacturing:'🏭',energy:'⚡',technology:'💻',services:'🏦',tourism:'✈️'})[c.sector] || '🏢';
-        const profit = Number(c.revenue || 0) * Number(c.profitMargin || 0);
-        const worth = Number(c.worth || Math.max(0, profit * 20));
-        const sharesOutstanding = Math.max(1, Number(c.sharesOutstanding || 1));
-        const citizenShares = Number(portfolio.stockHoldings?.[c.id]?.shares || c.populationOwnedShares || 0);
-        const citizenPct = (citizenShares / sharesOutstanding) * 100;
-        const companyPct = (Number(c.companyOwnedShares || 0) / sharesOutstanding) * 100;
-        const outgoingTargets = Object.keys(outgoingInvestments[c.id] || {}).length;
-        const incomingInvestorCount = Object.values(outgoingInvestments).reduce((count, holdings) => count + (holdings?.[c.id] ? 1 : 0), 0);
-        const stockLabel = c.public
-          ? ('Stock $' + Number(c.stockPrice || 0).toFixed(2) + ' (' + (Number(c.stockChangePct || 0) >= 0 ? '+' : '') + Number(c.stockChangePct || 0).toFixed(2) + '%)')
-          : 'Private';
-        h += '<div style="padding:4px 0;border-bottom:1px solid rgba(84,140,196,0.1)">';
-        h += '<div style="display:flex;justify-content:space-between;gap:8px">';
-        h += '<span>' + sectorIcon + ' ' + c.name + ' <span style="color:var(--accent-blue)">T' + Math.round(num(c.techTier, 1)) + '</span></span>';
-        h += '<span style="color:' + (c.public ? 'var(--accent-blue)' : 'var(--text-muted)') + ';font-weight:600">' + stockLabel + '</span>';
-        h += '</div>';
-        h += '<div style="color:var(--accent-green);font-weight:600;padding-top:2px">Rev ' + formatMarketMoneyCard(c.revenue) + ' | Pft ' + formatMarketMoneyCard(profit) + ' | Div ' + formatMarketMoneyCard(c.profitDistributed) + ' | Worth ' + formatMarketMoneyCard(worth) + '</div>';
-        h += '<div style="color:var(--text-secondary);padding-top:2px">Citizen Share ' + citizenPct.toFixed(2) + '% | Cross-held ' + companyPct.toFixed(2) + '% | Investments Out ' + outgoingTargets + ' | Investors In ' + incomingInvestorCount + '</div>';
-        h += '</div>';
-      });
-      if (localStockSnapshot.topGainer) {
-        h += '<div style="padding-top:4px;color:var(--accent-green)">📈 Best Listed: ' + localStockSnapshot.topGainer.name + ' +' + num(localStockSnapshot.topGainer.stockChangePct).toFixed(2) + '%</div>';
-      }
-      if (localStockSnapshot.topLoser) {
-        h += '<div style="padding-top:2px;color:var(--accent-red)">📉 Worst Listed: ' + localStockSnapshot.topLoser.name + ' ' + num(localStockSnapshot.topLoser.stockChangePct).toFixed(2) + '%</div>';
-      }
-      h += '</div>';
-      return h;
-    })()}
     ${badge ? `<div class="nation-relations"><span class="relation-badge ${badge.cls}">${badge.text}</span></div>` : ''}
     <div class="nation-actions">
       ${isPlayer ? '' : `<button class="btn-sm" onclick="GAME.selectedNation = '${GAME.playerNation.id}'; renderNationCard(); renderMap();">🏠 Back To Player</button>`}
+      <button class="btn-sm" onclick="openTab('econ')">📊 View Economy</button>
       ${isPlayer ? `<button class="btn-sm" onclick="openTab('diplo')">🤝 Diplomacy</button>` : `<button class="btn-sm" onclick="playerDeclareWar('${p.id}')">⚔️ Declare War</button>`}
-      ${isPlayer ? `<button class="btn-sm" onclick="openTab('econ')">💰 Economy</button>` : `<button class="btn-sm" onclick="playerFormAlliance('${p.id}')">🤝 Alliance</button>`}
-      ${isPlayer ? `<button class="btn-sm" onclick="openTab('research')">🔬 R&D Lab</button>` : `<button class="btn-sm" onclick="openForeignNationIntel('${p.id}')">🔍 Investigate</button>`}
+      ${isPlayer ? `<button class="btn-sm" onclick="openTab('research')">🔬 R&D Lab</button>` : `<button class="btn-sm" onclick="playerFormAlliance('${p.id}')">🤝 Alliance</button>`}
+      ${isPlayer ? `<button class="btn-sm" onclick="openTab('space')">🚀 Space</button>` : `<button class="btn-sm" onclick="openForeignNationIntel('${p.id}')">🔍 Investigate</button>`}
       ${isPlayer ? `<button class="btn-sm" onclick="openTab('mil')">⚔️ Military</button>` : `<button class="btn-sm" onclick="openForeignNationIntel('${p.id}')">🏭 Defense Industry</button>`}
       ${isPlayer ? `<button class="btn-sm" onclick="openTab('history')">📈 Intel</button>` : `<button class="btn-sm" onclick="playerRaidResources('${p.id}')">🛢️ Raid</button>`}
     </div>
@@ -3961,7 +4035,7 @@ const TAB_NAMES = {
   space: '🚀 Space Program',
   research: '🔬 Research & Tech',
   history: '📈 Historical Data',
-  leaderboard: '🏆 Leaderboards',
+  leaderboard: '🏆 Rankings',
 };
 
 function openTab(tabName) {
@@ -4001,6 +4075,7 @@ function renderTabContent(tab) {
     case 'econ':
       content.innerHTML = renderEconomyTab();
       attachBudgetListeners();
+      if (typeof attachEconomyTabInteractions === 'function') attachEconomyTabInteractions();
       break;
     case 'news':
       content.innerHTML = renderWorldNewsTab();
@@ -4707,7 +4782,7 @@ function renderLeaderboardTab() {
 
   return `
     <div class="tab-section">
-      <h3>Global Leaderboards</h3>
+      <h3>Global Rankings</h3>
       <div class="metric-pills" id="leaderboardMetricPills">
         ${Object.keys(LEADERBOARD_METRICS).map(m => `<button class="metric-pill ${m === metric ? 'active' : ''}" data-leaderboard-metric="${m}">${LEADERBOARD_METRICS[m]}</button>`).join('')}
       </div>
@@ -4821,6 +4896,8 @@ function init() {
     });
     syncPlayerNationFromRecord();
   }
+  // Seed all universities for every nation
+  if (typeof eduSystemInit === 'function') eduSystemInit();
   updateHUD();
   initMap();
   loadGeoBoundariesMap();
