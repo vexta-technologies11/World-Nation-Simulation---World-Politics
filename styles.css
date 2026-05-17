@@ -1473,6 +1473,33 @@ html, body {
   background: #4a9fd4;
 }
 
+/* Diplomatic Power UI */
+.diplo-power-card {
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  background: rgba(9, 28, 54, 0.35);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.diplo-power-card:hover {
+  border-color: var(--accent-blue);
+  background: rgba(84, 140, 196, 0.1);
+}
+
+.diplo-power-rank {
+  font-size: 14px;
+  font-weight: 700;
+  min-width: 32px;
+}
+
+.diplo-power-value {
+  font-size: 16px;
+  font-weight: 700;
+}
+
 /* History & Leaderboard */
 .history-controls {
   margin-bottom: 10px;

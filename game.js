@@ -4307,6 +4307,7 @@ const TAB_NAMES = {
   mil: '⚔️ Military',
   conflict: '⚔️ Conflicts',
   diplo: '🤝 Diplomacy',
+  globaldiplo: '🌐 Global Diplomacy',
   worldbank: '🏦 World Bank',
   intel: '🕵️ Intelligence',
   space: '🚀 Space Program',
@@ -4338,7 +4339,7 @@ function refreshRealtimeTabs() {
   if (dom.tabOverlay.classList.contains('hidden')) return;
 
   // Keep high-churn analytics tabs live while simulation runs.
-  if (GAME.activeTab === 'history' || GAME.activeTab === 'leaderboard' || GAME.activeTab === 'econ' || GAME.activeTab === 'finance' || GAME.activeTab === 'intel' || GAME.activeTab === 'news' || GAME.activeTab === 'defensecos' || GAME.activeTab === 'worldbank') {
+  if (GAME.activeTab === 'history' || GAME.activeTab === 'leaderboard' || GAME.activeTab === 'econ' || GAME.activeTab === 'finance' || GAME.activeTab === 'intel' || GAME.activeTab === 'news' || GAME.activeTab === 'defensecos' || GAME.activeTab === 'worldbank' || GAME.activeTab === 'diplo' || GAME.activeTab === 'globaldiplo') {
     renderTabContent(GAME.activeTab);
   }
 }
@@ -4379,6 +4380,11 @@ function renderTabContent(tab) {
       content.innerHTML = renderConflictsTab();
       break;
     case 'diplo':
+      content.innerHTML = renderDiplomacyTab();
+      attachDiplomacyListeners();
+      break;
+    case 'globaldiplo':
+      window._diploView = 'top_powers';
       content.innerHTML = renderDiplomacyTab();
       attachDiplomacyListeners();
       break;
@@ -4650,21 +4656,54 @@ function renderDiplomacyTab() {
   initDiplomacyState();
   const ds = GAME.diplomacyState;
   const playerId = GAME.playerNation.id;
+  const diploView = window._diploView || 'main';
+  const splitDiploUiPairKey = (key) => {
+    if (typeof key !== 'string') return ['', ''];
+    if (key.includes('::')) {
+      const [aId, bId] = key.split('::');
+      return [aId || '', bId || ''];
+    }
+    if (key.includes('_')) {
+      const [aId, bId] = key.split('_');
+      return [aId || '', bId || ''];
+    }
+    return [key, ''];
+  };
+  
+  // Route to different views
+  if (diploView === 'top_powers') {
+    return renderTopDiplomaticPowers();
+  }
+  if (diploView === 'nation_profile') {
+    return renderNationDiplomaticProfile(window._diploSelectedNation);
+  }
   
   // Player's diplomatic events
   const playerEvents = (ds.diplomaticEvents || []).filter(e => e.nation === playerId || e.target === playerId).slice(0, 15);
   
   // Player's sanctions
-  const playerSanctions = Object.entries(ds.sanctions || {}).filter(([key]) => key.includes(playerId));
+  const playerSanctions = Object.entries(ds.sanctions || {}).filter(([key]) => {
+    const [aId, bId] = splitDiploUiPairKey(key);
+    return aId === playerId || bId === playerId;
+  });
   
   // Player's trade agreements
-  const playerTradeAgreements = Object.entries(ds.tradeAgreements || {}).filter(([key]) => key.includes(playerId));
+  const playerTradeAgreements = Object.entries(ds.tradeAgreements || {}).filter(([key]) => {
+    const [aId, bId] = splitDiploUiPairKey(key);
+    return aId === playerId || bId === playerId;
+  });
   
   // Player's investments
-  const playerInvestments = Object.entries(ds.investments || {}).filter(([key]) => key.includes(playerId));
+  const playerInvestments = Object.entries(ds.investments || {}).filter(([key]) => {
+    const [aId, bId] = splitDiploUiPairKey(key);
+    return aId === playerId || bId === playerId;
+  });
   
   // Player's foreign aid
-  const playerAid = Object.entries(ds.foreignAid || {}).filter(([key]) => key.includes(playerId));
+  const playerAid = Object.entries(ds.foreignAid || {}).filter(([key]) => {
+    const [aId, bId] = splitDiploUiPairKey(key);
+    return aId === playerId || bId === playerId;
+  });
   
   // Player's coalitions
   const playerCoalitions = (ds.coalitions || []).filter(c => c.members.includes(playerId));
@@ -4714,7 +4753,7 @@ function renderDiplomacyTab() {
     <div class="tab-section">
       <h3>📜 Trade Agreements</h3>
       ${playerTradeAgreements.map(([key, agreement]) => {
-        const [aId, bId] = key.split('_');
+        const [aId, bId] = splitDiploUiPairKey(key);
         const partnerId = aId === playerId ? bId : aId;
         const partner = NATIONS[partnerId];
         const turnsLeft = agreement.duration - (GAME.turn - agreement.turn);
@@ -4732,7 +4771,7 @@ function renderDiplomacyTab() {
     <div class="tab-section">
       <h3>💰 Investments & Returns</h3>
       ${playerInvestments.map(([key, investment]) => {
-        const [aId, bId] = key.split('_');
+        const [aId, bId] = splitDiploUiPairKey(key);
         const isInvestor = aId === playerId;
         const otherId = isInvestor ? bId : aId;
         const other = NATIONS[otherId];
@@ -4753,7 +4792,7 @@ function renderDiplomacyTab() {
     <div class="tab-section">
       <h3>🤝 Foreign Aid</h3>
       ${playerAid.map(([key, aid]) => {
-        const [aId, bId] = key.split('_');
+        const [aId, bId] = splitDiploUiPairKey(key);
         const isGiver = aId === playerId;
         const otherId = isGiver ? bId : aId;
         const other = NATIONS[otherId];
@@ -4771,7 +4810,7 @@ function renderDiplomacyTab() {
     <div class="tab-section">
       <h3>🚫 Sanctions</h3>
       ${playerSanctions.map(([key, sanction]) => {
-        const [aId, bId] = key.split('_');
+        const [aId, bId] = splitDiploUiPairKey(key);
         const isTarget = bId === playerId;
         const otherId = isTarget ? aId : bId;
         const other = NATIONS[otherId];
@@ -4836,7 +4875,249 @@ function renderDiplomacyTab() {
         <button class="action-btn" onclick="playerDiplomaticAction('alliance')">🤝 Form Alliance</button>
       </div>
     </div>
+
+    <div class="tab-section">
+      <h3>🏆 Top Diplomatic Powers</h3>
+      <button class="action-btn" onclick="window._diploView='top_powers'; refreshRealtimeTabs();" style="width:100%;margin-bottom:8px">🌐 View Top 10 Diplomatic Powers</button>
+    </div>
   `;
+}
+
+function renderTopDiplomaticPowers() {
+  if (typeof getTopDiplomaticPowers !== 'function') {
+    return `<div class="tab-section"><p class="text-muted">Diplomatic power system not available.</p></div>`;
+  }
+  
+  const topPowers = getTopDiplomaticPowers(10);
+  const playerId = GAME.playerNation.id;
+  const playerPower = typeof computeDiplomaticPower === 'function' ? computeDiplomaticPower(GAME.playerNation) : 0;
+  const playerRank = topPowers.findIndex(p => p.nation.id === playerId) + 1;
+  
+  let html = `
+    <div class="tab-section">
+      <button class="wb-back-btn" onclick="window._diploView='main'; refreshRealtimeTabs();">← Back to Diplomacy</button>
+      <h3>🏆 Top 10 Diplomatic Powers</h3>
+      <div class="resource-grid">
+        <div class="resource-item"><span class="r-name">Your Rank</span><span class="r-val">${playerRank > 0 ? '#' + playerRank : 'Unranked'}</span></div>
+        <div class="resource-item"><span class="r-name">Your Power</span><span class="r-val">${playerPower}</span></div>
+      </div>
+    </div>
+  `;
+  
+  html += `<div class="tab-section">`;
+  
+  topPowers.forEach((entry, idx) => {
+    const nation = entry.nation;
+    const power = entry.power;
+    const profile = typeof getNationDiplomaticProfile === 'function' ? getNationDiplomaticProfile(nation.id) : null;
+    const isPlayer = nation.id === playerId;
+    const rankColor = idx < 3 ? 'var(--accent-green)' : idx < 7 ? 'var(--accent-blue)' : 'var(--text-secondary)';
+    
+    html += `
+      <div class="wb-loan-card" onclick="window._diploView='nation_profile'; window._diploSelectedNation='${nation.id}'; refreshRealtimeTabs();" style="cursor:pointer;border-left:3px solid ${rankColor}">
+        <div class="wb-loan-header">
+          <span class="wb-loan-borrower">#${idx + 1} ${nation.flag} ${nation.name} ${isPlayer ? '(You)' : ''}</span>
+          <span class="wb-loan-status" style="color:${rankColor};font-size:14px;font-weight:700">${power}</span>
+        </div>
+        <div class="wb-loan-terms">
+          GDP: $${(nation.gdp || 0).toFixed(2)}T · Military: ${nation.militaryPower?.toFixed(0) || 0} · Tech: T${nation.techLevel?.toFixed(1) || 1}
+        </div>
+        ${profile ? `
+        <div class="wb-loan-terms">
+          Alliances: ${profile.alliances.count} · Aid Sent: $${(profile.aid.given * 1000).toFixed(0)}M · Invested: $${(profile.investments.totalInvested * 1000).toFixed(0)}M
+        </div>
+        <div class="wb-loan-terms">
+          Returns: $${(profile.investments.totalReceived * 1000).toFixed(0)}M · P/L: <span class="${profile.investments.profit >= 0 ? 'positive' : 'negative'}">$${(profile.investments.profit * 1000).toFixed(0)}M</span> · Trade: ${profile.tradeAgreements.count}
+        </div>
+        ` : ''}
+      </div>
+    `;
+  });
+  
+  html += `</div>`;
+  
+  return html;
+}
+
+function renderNationDiplomaticProfile(nationId) {
+  if (typeof getNationDiplomaticProfile !== 'function') {
+    return `<div class="tab-section"><p class="text-muted">Diplomatic profile not available.</p></div>`;
+  }
+  
+  const profile = getNationDiplomaticProfile(nationId);
+  if (!profile) return `<div class="tab-section"><p class="text-muted">Nation not found.</p></div>`;
+  
+  const nation = profile.nation;
+  const isPlayer = nation.id === GAME.playerNation.id;
+  
+  let html = `
+    <div class="tab-section">
+      <button class="wb-back-btn" onclick="window._diploView='top_powers'; refreshRealtimeTabs();">← Back to Top Powers</button>
+      <h3>${nation.flag} ${nation.name} - Diplomatic Profile ${isPlayer ? '(You)' : ''}</h3>
+      <div class="resource-grid">
+        <div class="resource-item"><span class="r-name">Diplomatic Power</span><span class="r-val" style="font-size:18px;font-weight:700">${profile.diplomaticPower}</span></div>
+        <div class="resource-item"><span class="r-name">GDP</span><span class="r-val">$${(nation.gdp || 0).toFixed(2)}T</span></div>
+        <div class="resource-item"><span class="r-name">Military</span><span class="r-val">${nation.militaryPower?.toFixed(0) || 0}</span></div>
+        <div class="resource-item"><span class="r-name">Tech Level</span><span class="r-val">T${nation.techLevel?.toFixed(1) || 1}</span></div>
+        <div class="resource-item"><span class="r-name">Friendly</span><span class="r-val positive">${profile.relations.friendly}</span></div>
+        <div class="resource-item"><span class="r-name">Hostile</span><span class="r-val negative">${profile.relations.hostile}</span></div>
+      </div>
+    </div>
+  `;
+  
+  // Investments
+  html += `<div class="tab-section"><h3>💰 Investments</h3>`;
+  html += `<div class="resource-grid">`;
+  html += `<div class="resource-item"><span class="r-name">Total Invested</span><span class="r-val">$${(profile.investments.totalInvested * 1000).toFixed(0)}M</span></div>`;
+  html += `<div class="resource-item"><span class="r-name">Expected Return</span><span class="r-val">$${(profile.investments.totalExpected * 1000).toFixed(0)}M</span></div>`;
+  html += `<div class="resource-item"><span class="r-name">Received</span><span class="r-val">$${(profile.investments.totalReceived * 1000).toFixed(0)}M</span></div>`;
+  const profitColor = profile.investments.profit >= 0 ? 'positive' : 'negative';
+  html += `<div class="resource-item"><span class="r-name">Profit/Loss</span><span class="r-val ${profitColor}">$${(profile.investments.profit * 1000).toFixed(0)}M</span></div>`;
+  html += `</div></div>`;
+  
+  // Aid
+  html += `<div class="tab-section"><h3>🤝 Foreign Aid</h3>`;
+  html += `<div class="resource-grid">`;
+  html += `<div class="resource-item"><span class="r-name">Aid Given</span><span class="r-val positive">$${(profile.aid.given * 1000).toFixed(0)}M (${profile.aid.givenCount})</span></div>`;
+  html += `<div class="resource-item"><span class="r-name">Aid Received</span><span class="r-val">$${(profile.aid.received * 1000).toFixed(0)}M (${profile.aid.receivedCount})</span></div>`;
+  html += `</div></div>`;
+  
+  // Alliances
+  html += `<div class="tab-section"><h3>🤝 Alliances (${profile.alliances.count})</h3>`;
+  if (profile.alliances.list.length > 0) {
+    profile.alliances.list.forEach(a => {
+      html += `<div class="diplomacy-detail-item">
+        <span>${a.nation.flag} ${a.nation.name}</span>
+        <span>Strength: ${a.strength?.toFixed(0) || 50}</span>
+      </div>`;
+    });
+  } else {
+    html += `<p class="text-muted">No active alliances.</p>`;
+  }
+  html += `</div>`;
+  
+  // Trade Agreements
+  html += `<div class="tab-section"><h3>📜 Trade Agreements (${profile.tradeAgreements.count})</h3>`;
+  if (profile.tradeAgreements.list.length > 0) {
+    profile.tradeAgreements.list.forEach(t => {
+      const turnsLeft = t.duration - (GAME.turn - t.turn);
+      html += `<div class="diplomacy-detail-item">
+        <span>${t.nation.flag} ${t.nation.name}</span>
+        <span>GDP +${(t.gdpBoost * 100).toFixed(1)}% | ${turnsLeft} turns left</span>
+      </div>`;
+    });
+  } else {
+    html += `<p class="text-muted">No active trade agreements.</p>`;
+  }
+  html += `</div>`;
+  
+  // Sanctions
+  html += `<div class="tab-section"><h3>🚫 Sanctions</h3>`;
+  html += `<div class="resource-grid">`;
+  html += `<div class="resource-item"><span class="r-name">Imposed</span><span class="r-val negative">${profile.sanctions.imposed}</span></div>`;
+  html += `<div class="resource-item"><span class="r-name">Received</span><span class="r-val">${profile.sanctions.received}</span></div>`;
+  html += `</div></div>`;
+  
+  // Diplomatic pressure action (for high-power nations)
+  if (!isPlayer && profile.diplomaticPower > 150) {
+    html += `<div class="tab-section">
+      <h3>⚡ Diplomatic Pressure</h3>
+      <p class="text-muted mb-1">Use your diplomatic power (${profile.diplomaticPower}) to influence this nation.</p>
+      <div class="action-grid" style="grid-template-columns:1fr 1fr">
+        <button class="action-btn" onclick="playerDiplomaticPressure('${nation.id}', 'ceasefire')">🕊️ Demand Ceasefire</button>
+        <button class="action-btn" onclick="playerDiplomaticPressure('${nation.id}', 'sanctions')">🚫 Threaten Sanctions</button>
+        <button class="action-btn" onclick="playerDiplomaticPressure('${nation.id}', 'military')">⚔️ Military Threat</button>
+        <button class="action-btn" onclick="playerDiplomaticPressure('${nation.id}', 'financial')">💰 Financial Pressure</button>
+      </div>
+    </div>`;
+  }
+  
+  return html;
+}
+
+function playerDiplomaticPressure(targetId, type) {
+  const target = NATIONS[targetId];
+  if (!target) return;
+  
+  const playerPower = typeof computeDiplomaticPower === 'function' ? computeDiplomaticPower(GAME.playerNation) : 0;
+  const targetPower = typeof computeDiplomaticPower === 'function' ? computeDiplomaticPower(target) : 0;
+  const powerGap = playerPower - targetPower;
+  
+  if (powerGap < 50) {
+    addNews(`⚠️ Your diplomatic power (${playerPower}) is not significantly higher than ${target.flag} ${target.name} (${targetPower}). Pressure may backfire.`, 'major');
+    return;
+  }
+  
+  const successChance = clamp(0.3 + powerGap * 0.002, 0.2, 0.8);
+  const success = powerGap >= 300 ? true : Math.random() < successChance;
+  
+  const key = relationshipKey(GAME.playerNation.id, targetId);
+  
+  switch (type) {
+    case 'ceasefire':
+      // Check if target is in conflict
+      const conflict = GAME.conflicts.find(c => (c.a === targetId || c.b === targetId) && c.phase !== 'peace');
+      if (!conflict) {
+        addNews(`🕊️ ${target.flag} ${target.name} is not currently in a conflict.`, 'minor');
+        return;
+      }
+      if (success) {
+        conflict.phase = 'ceasefire';
+        conflict.ceasefireTurns = 0;
+        conflict.ceasefireDuration = 5 + Math.floor(Math.random() * 10);
+        conflict.ceasefireBy = GAME.playerNation.id;
+        GAME.bilateralRelations[key] = clamp((GAME.bilateralRelations[key] || 0) + 5, -100, 100);
+        addNews(`🕊️ ${GAME.playerNation.flag} ${GAME.playerNation.name} demands ceasefire. ${target.flag} ${target.name} accepts for ${conflict.ceasefireDuration} turns.`, 'major');
+      } else {
+        GAME.bilateralRelations[key] = clamp((GAME.bilateralRelations[key] || 0) - 10, -100, 100);
+        addNews(`⚠️ ${target.flag} ${target.name} rejects ${GAME.playerNation.flag} ${GAME.playerNation.name}'s ceasefire demand. Relations worsen.`, 'major');
+      }
+      break;
+      
+    case 'sanctions':
+      if (success) {
+        if (typeof GAME !== 'undefined' && GAME.diplomacyState) {
+          GAME.diplomacyState.sanctions[key] = {
+            severity: clamp(5 + Math.floor(powerGap / 50), 3, 20),
+            turn: GAME.turn,
+            reason: 'diplomatic pressure',
+            imposedBy: GAME.playerNation.id,
+          };
+        }
+        target.stability = clamp(target.stability - 3, 1, 100);
+        addNews(`🚫 ${GAME.playerNation.flag} ${GAME.playerNation.name} threatens sanctions on ${target.flag} ${target.name}. ${target.name} backs down.`, 'major');
+      } else {
+        GAME.bilateralRelations[key] = clamp((GAME.bilateralRelations[key] || 0) - 8, -100, 100);
+        addNews(`⚠️ ${target.flag} ${target.name} defies ${GAME.playerNation.flag} ${GAME.playerNation.name}'s sanction threat.`, 'major');
+      }
+      break;
+      
+    case 'military':
+      if (success) {
+        target.militaryPower = clamp(target.militaryPower - 2, 0, 100);
+        target.stability = clamp(target.stability - 5, 1, 100);
+        GAME.bilateralRelations[key] = clamp((GAME.bilateralRelations[key] || 0) - 5, -100, 100);
+        addNews(`⚔️ ${GAME.playerNation.flag} ${GAME.playerNation.name} threatens military action. ${target.flag} ${target.name} shows restraint.`, 'major');
+      } else {
+        GAME.bilateralRelations[key] = clamp((GAME.bilateralRelations[key] || 0) - 15, -100, 100);
+        addNews(`🔥 ${target.flag} ${target.name} calls ${GAME.playerNation.flag} ${GAME.playerNation.name}'s military bluff. Tensions escalate!`, 'major');
+      }
+      break;
+      
+    case 'financial':
+      if (success) {
+        target.gdp = clamp(target.gdp - 0.05, 0.05, 100);
+        target.stability = clamp(target.stability - 3, 1, 100);
+        addNews(`💰 ${GAME.playerNation.flag} ${GAME.playerNation.name} applies financial pressure. ${target.flag} ${target.name}'s economy weakens.`, 'major');
+      } else {
+        GAME.bilateralRelations[key] = clamp((GAME.bilateralRelations[key] || 0) - 10, -100, 100);
+        addNews(`⚠️ ${target.flag} ${target.name} resists ${GAME.playerNation.flag} ${GAME.playerNation.name}'s financial pressure.`, 'major');
+      }
+      break;
+  }
+  
+  renderNationCard();
+  refreshRealtimeTabs();
 }
 
 function attachDiplomacyListeners() {
