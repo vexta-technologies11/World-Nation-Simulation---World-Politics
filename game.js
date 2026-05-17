@@ -3862,19 +3862,41 @@ function renderNationCard() {
     ${(() => {
       const comps = sourceNation.companies || [];
       if (comps.length === 0) return '';
+      const portfolio = sourceNation.populationPortfolio || { dividendReceived: 0, totalInvested: 0, stockHoldings: {} };
+      const listedCount = comps.filter(c => c.public).length;
+      const outgoingInvestments = sourceNation.companyInvestments || {};
       const top = comps.slice().sort((a,b) => {
         const aw = Number(a.worth || (Number(a.revenue || 0) * Number(a.profitMargin || 0) * 20));
         const bw = Number(b.worth || (Number(b.revenue || 0) * Number(b.profitMargin || 0) * 20));
         return bw - aw;
       }).slice(0, 10);
       let h = '<div class="section-card" style="margin:8px 0;padding:6px 8px;font-size:11px"><div style="font-weight:600;font-size:12px;margin-bottom:4px">🏢 Companies (' + comps.length + ')</div>';
+      h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:4px;margin-bottom:6px">';
+      h += '<div class="resource-item"><span class="r-name">Listed</span><span class="r-val">' + listedCount + '</span></div>';
+      h += '<div class="resource-item"><span class="r-name">Citizen Invested</span><span class="r-val" style="color:var(--accent-blue)">' + formatMarketMoneyCard(portfolio.totalInvested) + '</span></div>';
+      h += '<div class="resource-item"><span class="r-name">Citizen Dividend</span><span class="r-val" style="color:var(--accent-green)">' + formatMarketMoneyCard(portfolio.dividendReceived) + '</span></div>';
+      h += '<div class="resource-item"><span class="r-name">Local Market Cap</span><span class="r-val" style="color:var(--accent-yellow)">' + formatMarketMoneyCard(localStockSnapshot.marketCap) + '</span></div>';
+      h += '</div>';
       top.forEach((c, i) => {
         const sectorIcon = ({agriculture:'🌾',manufacturing:'🏭',energy:'⚡',technology:'💻',services:'🏦',tourism:'✈️'})[c.sector] || '🏢';
         const profit = Number(c.revenue || 0) * Number(c.profitMargin || 0);
         const worth = Number(c.worth || Math.max(0, profit * 20));
-        h += '<div style="display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid rgba(84,140,196,0.1)">';
+        const sharesOutstanding = Math.max(1, Number(c.sharesOutstanding || 1));
+        const citizenShares = Number(portfolio.stockHoldings?.[c.id]?.shares || c.populationOwnedShares || 0);
+        const citizenPct = (citizenShares / sharesOutstanding) * 100;
+        const companyPct = (Number(c.companyOwnedShares || 0) / sharesOutstanding) * 100;
+        const outgoingTargets = Object.keys(outgoingInvestments[c.id] || {}).length;
+        const incomingInvestorCount = Object.values(outgoingInvestments).reduce((count, holdings) => count + (holdings?.[c.id] ? 1 : 0), 0);
+        const stockLabel = c.public
+          ? ('Stock $' + Number(c.stockPrice || 0).toFixed(2) + ' (' + (Number(c.stockChangePct || 0) >= 0 ? '+' : '') + Number(c.stockChangePct || 0).toFixed(2) + '%)')
+          : 'Private';
+        h += '<div style="padding:4px 0;border-bottom:1px solid rgba(84,140,196,0.1)">';
+        h += '<div style="display:flex;justify-content:space-between;gap:8px">';
         h += '<span>' + sectorIcon + ' ' + c.name + ' <span style="color:var(--accent-blue)">T' + Math.round(num(c.techTier, 1)) + '</span></span>';
-        h += '<span style="color:var(--accent-green);font-weight:600">Rev ' + formatMarketMoneyCard(c.revenue) + ' | Pft ' + formatMarketMoneyCard(profit) + ' | Worth ' + formatMarketMoneyCard(worth) + '</span>';
+        h += '<span style="color:' + (c.public ? 'var(--accent-blue)' : 'var(--text-muted)') + ';font-weight:600">' + stockLabel + '</span>';
+        h += '</div>';
+        h += '<div style="color:var(--accent-green);font-weight:600;padding-top:2px">Rev ' + formatMarketMoneyCard(c.revenue) + ' | Pft ' + formatMarketMoneyCard(profit) + ' | Div ' + formatMarketMoneyCard(c.profitDistributed) + ' | Worth ' + formatMarketMoneyCard(worth) + '</div>';
+        h += '<div style="color:var(--text-secondary);padding-top:2px">Citizen Share ' + citizenPct.toFixed(2) + '% | Cross-held ' + companyPct.toFixed(2) + '% | Investments Out ' + outgoingTargets + ' | Investors In ' + incomingInvestorCount + '</div>';
         h += '</div>';
       });
       if (localStockSnapshot.topGainer) {

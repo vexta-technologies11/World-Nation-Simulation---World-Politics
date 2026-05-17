@@ -405,6 +405,19 @@ function initNationIndustries(nation) {
   nation.corporateEarnings = 0;
   nation.localMarketCap = 0;
   nation.localListedCount = 0;
+
+    // Population stock portfolio: citizens invest in public companies
+    nation.populationPortfolio = nation.populationPortfolio || {
+      investmentRate: clamp(2 + Math.random() * 6, 2, 8), // 2-8% of employed population invests
+      totalInvested: 0, // $M
+      dividendReceived: 0, // $M per month
+      stockHoldings: {}, // companyId -> { shares: 1000000, averageCost: 50 }
+      history: [], // track price history
+    };
+  
+    // Company cross-investments
+    nation.companyInvestments = nation.companyInvestments || {}; // investorCompanyId -> { targetCompanyId -> shares }
+  
   initNationMarketDynamics(nation);
   
   // Initialize each sector
@@ -546,6 +559,11 @@ function generateNationCompanies(nation, initial = false) {
       distressMonths: 0,
       strategicFocus: chosenSector, // company knows what sector it's in
       worth: 0,
+      // Dividend & investor tracking
+      profitDistributed: 0, // $M per month to dividends
+      priceHistory: [], // track stock price over time
+      populationOwnedShares: 0, // citizen ownership
+      companyOwnedShares: 0, // other companies' ownership
     };
     company.worth = estimateCompanyWorth(company);
     
@@ -599,6 +617,158 @@ function computeNationTaxRevenue(nation) {
     efficiency: efficiency,
     rates: taxConfig
   };
+}
+
+// ─── POPULATION STOCK INVESTMENTS ─────────────────────
+
+function updatePopulationStockInvestments(nation) {
+  initNationIndustries(nation);
+  const portfolio = nation.populationPortfolio;
+  
+  // Calculate investment capacity: (employed population) * (investment rate %) * (disposable income)
+  const employedPop = nation.population * Math.max(0, nation.jobs / 100); // millions
+  const investmentCapacity = employedPop * (portfolio.investmentRate / 100) * 0.0005; // $M per month
+  
+  const publicCompanies = nation.companies.filter(c => c.public);
+  if (publicCompanies.length === 0) return;
+  
+  // Redistribute portfolio to match sector preferences + company fundamentals
+  const targetAllocation = {}; // companyId -> % to hold
+  let totalScore = 0;
+  
+  publicCompanies.forEach(c => {
+    // Score: profit margin (quality) + tech tier (growth) - volatility (risk)
+    const score = (c.profitMargin || 0) * 3 + (c.techTier || 1) * 0.5 + (c.growthRate || 0) * 2;
+    targetAllocation[c.id] = Math.max(0.1, score);
+    totalScore += targetAllocation[c.id];
+  });
+  
+  // Normalize to percentages
+  Object.keys(targetAllocation).forEach(cid => {
+    targetAllocation[cid] = targetAllocation[cid] / Math.max(0.1, totalScore);
+  });
+  
+  // Buy/sell to rebalance portfolio monthly (5-10% rebalancing pace)
+  const rebalancingPace = 0.075;
+  publicCompanies.forEach(c => {
+    const holdingShares = portfolio.stockHoldings[c.id]?.shares || 0;
+    const targetValue = investmentCapacity * targetAllocation[c.id];
+    const targetShares = targetValue / Math.max(0.01, c.stockPrice || 0.1);
+    
+    const shareDelta = (targetShares - holdingShares) * rebalancingPace;
+    if (Math.abs(shareDelta) > 100000) {
+      if (!portfolio.stockHoldings[c.id]) {
+        portfolio.stockHoldings[c.id] = { shares: 0, averageCost: c.stockPrice || 0 };
+      }
+      portfolio.stockHoldings[c.id].shares += shareDelta;
+      portfolio.totalInvested += shareDelta * (c.stockPrice || 0);
+      c.populationOwnedShares += shareDelta;
+    }
+  });
+}
+
+// ─── DIVIDEND PROCESSING ──────────────────────────────
+
+function processDividends(nation) {
+  const portfolio = nation.populationPortfolio;
+  portfolio.dividendReceived = 0;
+  
+  nation.companies.forEach(c => {
+    // Companies distribute 30-50% of profit as dividend
+    const profit = (c.revenue || 0) * (c.profitMargin || 0);
+    const dividendPayout = profit * clamp(0.3 + (c.techTier || 1) * 0.04, 0.3, 0.5);
+    c.profitDistributed = dividendPayout;
+    
+    // Distribute to shareholders (population + company investors)
+    const totalShares = (c.sharesOutstanding || 1);
+    const perShareDividend = dividendPayout / Math.max(1, totalShares);
+    
+    // Population dividend
+    const popShares = portfolio.stockHoldings[c.id]?.shares || 0;
+    const popDividend = popShares * perShareDividend;
+    portfolio.dividendReceived += popDividend;
+    
+    // Company-to-company dividend (via cross-investments)
+    if (nation.companyInvestments) {
+      Object.entries(nation.companyInvestments).forEach(([investorId, holdings]) => {
+        const shares = Number(holdings?.[c.id] || 0);
+        if (!shares) return;
+        const investorCo = nation.companies.find(comp => comp.id === investorId);
+        if (investorCo) {
+          investorCo.revenue = (investorCo.revenue || 0) + shares * perShareDividend * 0.8; // 80% goes to revenue
+        }
+      });
+    }
+  });
+  
+  // Add dividend to nation treasury/employment income (citizens feel wealthier, boost consumption)
+  const isPlayer = nation.id === GAME.playerNation?.id;
+  if (!isPlayer && nation.treasury !== undefined) {
+    nation.treasury += portfolio.dividendReceived * 0.5; // Half to treasury, half circulates economy
+  }
+}
+
+// ─── STOCK PRICE UPDATES ──────────────────────────────
+
+function updateCompanyStockPrices(nation) {
+  nation.companies.forEach(c => {
+    if (!c.public) return;
+    
+    // Price drivers: earnings, growth momentum, sector demand, tech tier
+    const earningsYield = (c.profitMargin || 0) * 0.3 + (c.growthRate || 0) * 1.5;
+    const sectorDemand = nation.marketDynamics?.sectorDemand?.[c.sector] || 100;
+    const demandSignal = (sectorDemand - 100) / 100 * 0.05;
+    const tierSignal = ((c.techTier || 1) - 1) * 0.01;
+    const volatility = (Math.random() - 0.5) * 0.08;
+    
+    // Price change: +/- 5% per month max
+    const priceChange = earningsYield + demandSignal + tierSignal + volatility;
+    const newPrice = Math.max(0.5, (c.stockPrice || 1) * (1 + clamp(priceChange, -0.05, 0.05)));
+    
+    c.stockChangePct = ((newPrice - (c.stockPrice || 1)) / Math.max(0.1, c.stockPrice || 1)) * 100;
+    c.stockPrice = newPrice;
+    
+    // Track price history (last 24 months)
+    if (!c.priceHistory) c.priceHistory = [];
+    c.priceHistory.push(c.stockPrice);
+    if (c.priceHistory.length > 24) c.priceHistory.shift();
+  });
+}
+
+// ─── COMPANY CROSS-INVESTMENTS ────────────────────────
+
+function updateCompanyInvestments(nation) {
+  if (nation.companies.length < 2) return;
+  
+  if (!nation.companyInvestments) nation.companyInvestments = {};
+  
+  // Every 3 turns, companies strategically invest in peers (diversification + synergy)
+  if ((GAME?.turn || 0) % 3 !== 0) return;
+  
+  nation.companies.forEach(investor => {
+    if (!investor.public || investor.profitMargin < 0.05) return; // Only profitable public companies invest
+    const investmentBudget = (investor.revenue || 0) * 0.02;
+    const candidates = nation.companies.filter(target =>
+      target !== investor &&
+      target.sector !== investor.sector &&
+      target.public &&
+      Math.random() > 0.7
+    );
+
+    if (candidates.length === 0) return;
+    const target = candidates[Math.floor(Math.random() * candidates.length)];
+
+    const sharesToBuy = Math.min(
+      Math.floor(investmentBudget / Math.max(0.1, target.stockPrice || 0)),
+      Math.floor((target.sharesOutstanding || 0) * 0.02)
+    );
+
+    if (sharesToBuy < 10000) return;
+
+    if (!nation.companyInvestments[investor.id]) nation.companyInvestments[investor.id] = {};
+    nation.companyInvestments[investor.id][target.id] = (nation.companyInvestments[investor.id][target.id] || 0) + sharesToBuy;
+    target.companyOwnedShares += sharesToBuy;
+  });
 }
 
 // ─── PROCESS ALL ECONOMIC SYSTEMS ─────────────────────
