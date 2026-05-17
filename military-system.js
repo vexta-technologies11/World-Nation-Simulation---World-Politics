@@ -946,11 +946,11 @@ function foundDefenseCompany(nation, companyIndex) {
 }
 
 const DEFENSE_FOUNDING_THRESHOLDS = [
-  { tier: 1, education: 20, score: 0.16 },
-  { tier: 2, education: 30, score: 0.28 },
-  { tier: 3, education: 40, score: 0.42 },
-  { tier: 4, education: 52, score: 0.58 },
-  { tier: 5, education: 62, score: 0.72 },
+  { tier: 1, education: 15, score: 0.10 },
+  { tier: 2, education: 22, score: 0.18 },
+  { tier: 3, education: 32, score: 0.30 },
+  { tier: 4, education: 44, score: 0.45 },
+  { tier: 5, education: 55, score: 0.60 },
 ];
 
 function _dcHash(input) {
@@ -992,14 +992,14 @@ function _defenseTierResourceGate(nation, tier) {
   const resourceScore = _defenseResourceScore(nation);
   const techLevel = Number(nation?.techLevel || 1);
   const gates = {
-    1: 14,
-    2: 24,
-    3: 36,
-    4: 52,
-    5: 68,
+    1: 8,
+    2: 16,
+    3: 26,
+    4: 40,
+    5: 55,
   };
-  const required = gates[tier] || 24;
-  return resourceScore >= required && techLevel >= Math.max(1, tier * 0.85);
+  const required = gates[tier] || 16;
+  return resourceScore >= required && techLevel >= Math.max(1, tier * 0.7);
 }
 
 function _defenseNationScore(nation) {
@@ -1032,9 +1032,9 @@ function processDefenseCompanyFoundings() {
   const unfounded = DEFENSE_COMPANIES.filter(company => company.foundedBy === null);
   if (unfounded.length === 0 || !NATIONS) return;
 
-  const COOLDOWN_TURNS = 30;
-  const MAX_PER_NATION = 3;
-  const MAX_GLOBAL_PER_TURN = 2;
+  const COOLDOWN_TURNS = 12;  // Reduced from 30
+  const MAX_PER_NATION = 5;   // Increased from 3
+  const MAX_GLOBAL_PER_TURN = 6;  // Increased from 2
   let globalFoundedThisTurn = 0;
 
   const nationIds = Object.keys(NATIONS).sort((a, b) => {
@@ -1068,7 +1068,8 @@ function processDefenseCompanyFoundings() {
     const score = _defenseNationScore(nation);
     const threshold = DEFENSE_FOUNDING_THRESHOLDS.find(entry => entry.tier === maxTier);
     const excess = threshold ? Math.max(0, score - threshold.score) : 0;
-    const probability = clamp(excess * 0.08 + 0.01, 0.005, 0.12);
+    // Increased probability significantly
+    const probability = clamp(excess * 0.15 + 0.08, 0.06, 0.35);
     if (Math.random() > probability) continue;
 
     const lowestTier = Math.min(...eligible.map(company => company.foundingTier || 3));
