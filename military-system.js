@@ -94,19 +94,9 @@ const DEFENSE_COMPANIES = [
   { id: "co_52", name: "Onyx Naval Systems", desc: "Mine warfare and undersea defense", foundedBy: null, foundedTurn: null, tier: 1, techLevel: 1.0, equipment: [], researchFocus: null, researchProgress: 0 }
 ];
 
-const _DC_FOUNDING_TIERS = {
-  co_01: 4, co_02: 2, co_03: 2, co_04: 4, co_05: 5, co_06: 1, co_07: 5, co_08: 2, co_09: 2, co_10: 5,
-  co_11: 3, co_12: 5, co_13: 2, co_14: 3, co_15: 3, co_16: 3, co_17: 3, co_18: 1, co_19: 3, co_20: 3,
-  co_21: 4, co_22: 3, co_23: 5, co_24: 2, co_25: 3, co_26: 3, co_27: 3, co_28: 5, co_29: 3, co_30: 2,
-  co_31: 4, co_32: 5, co_33: 2, co_34: 4, co_35: 4, co_36: 1, co_37: 2, co_38: 2, co_39: 4, co_40: 3,
-  co_41: 3, co_42: 4, co_43: 1, co_44: 2, co_45: 3, co_46: 1, co_47: 5, co_48: 4, co_49: 2, co_50: 5,
-  co_51: 1, co_52: 3,
-};
-
-DEFENSE_COMPANIES.forEach(company => {
-  company.foundingTier = _DC_FOUNDING_TIERS[company.id] || 3;
-});
-
+// Defense companies are NOT tier-restricted. Any company can research any equipment.
+// Company capability is determined by the founding nation's tech level, education, and research.
+// Companies unlock gradually over the first 50+ turns based on nation capability.
 
 // ─── EQUIPMENT TEMPLATES BY ERA ──────────────────────
 // 500+ equipment items across 8 eras. Each has power (combat strength),
@@ -945,14 +935,6 @@ function foundDefenseCompany(nation, companyIndex) {
   return true;
 }
 
-const DEFENSE_FOUNDING_THRESHOLDS = [
-  { tier: 1, education: 15, score: 0.10 },
-  { tier: 2, education: 22, score: 0.18 },
-  { tier: 3, education: 32, score: 0.30 },
-  { tier: 4, education: 44, score: 0.45 },
-  { tier: 5, education: 55, score: 0.60 },
-];
-
 function _dcHash(input) {
   let hash = 0;
   const text = String(input || '');
@@ -988,105 +970,112 @@ function _defenseResourceScore(nation) {
   );
 }
 
-function _defenseTierResourceGate(nation, tier) {
-  const resourceScore = _defenseResourceScore(nation);
-  const techLevel = Number(nation?.techLevel || 1);
-  const gates = {
-    1: 8,
-    2: 16,
-    3: 26,
-    4: 40,
-    5: 55,
-  };
-  const required = gates[tier] || 16;
-  return resourceScore >= required && techLevel >= Math.max(1, tier * 0.7);
-}
+// ── RESEARCH-DRIVEN COMPANY FOUNDING ──────────────────
+// Companies are NOT tier-restricted. Any company can research any equipment.
+// Company capability = founding nation's tech level, education, and research.
+// Companies unlock gradually based on nation capability score.
 
-function _defenseNationScore(nation) {
+function _defenseNationCapability(nation) {
+  // Combined score determining which companies a nation can found
   const education = Number(nation?.education || 0);
   const governance = Number(nation?.governance || 0);
-  const techLevel = Number(nation?.techLevel || 0);
+  const techLevel = Number(nation?.techLevel || 1);
   const innovationRisk = Number(nation?.innovationRisk ?? 45);
   const riskDiscipline = 100 - innovationRisk;
-  const rawInnovation = ((education * 0.45) + (governance * 0.20) + (techLevel * 12) + (riskDiscipline * 0.15)) / 100;
+  const resourceScore = _defenseResourceScore(nation);
   const militaryBudgetShare = clamp(((nation?.aiBudget?.military ?? 20) / 35), 0.5, 1.6);
-  const resourceFactor = clamp((_defenseResourceScore(nation) / 62), 0.45, 1.9);
-  return clamp(rawInnovation * militaryBudgetShare * resourceFactor, 0.08, 2.5);
+  
+  // Capability score: 0-100 scale
+  const rawCapability = (
+    education * 0.25 +           // Education drives R&D
+    governance * 0.10 +          // Governance enables execution
+    techLevel * 8 +              // Tech level is primary driver
+    riskDiscipline * 0.15 +      // Low innovation risk = better execution
+    Math.min(resourceScore, 80) * 0.15  // Resources matter but less
+  );
+  
+  return clamp(rawCapability * militaryBudgetShare, 5, 100);
 }
 
-function _defenseMaxFoundingTier(nation) {
-  const score = _defenseNationScore(nation);
-  const education = Number(nation?.education || 0);
-  let maxTier = 0;
+// Minimum capability to found a company (scales with turn number for gradual rollout)
+function _defenseMinCapabilityForFounding(turn) {
+  // First 10 turns: only top nations (cap > 50)
+  // Turns 10-30: mid-tier nations (cap > 35)
+  // Turns 30-50: lower-tier nations (cap > 20)
+  // After 50: almost anyone (cap > 12)
+  if (turn < 10) return 50;
+  if (turn < 20) return 40;
+  if (turn < 30) return 30;
+  if (turn < 50) return 20;
+  return 12;
+}
 
-  DEFENSE_FOUNDING_THRESHOLDS.forEach(threshold => {
-    if (education >= threshold.education && score >= threshold.score) {
-      maxTier = threshold.tier;
-    }
-  });
-
-  return maxTier;
+// Max companies per nation based on capability
+function _defenseMaxCompaniesForNation(nation) {
+  const capability = _defenseNationCapability(nation);
+  if (capability >= 70) return 8;
+  if (capability >= 55) return 6;
+  if (capability >= 40) return 4;
+  if (capability >= 25) return 3;
+  return 2;
 }
 
 function processDefenseCompanyFoundings() {
   const unfounded = DEFENSE_COMPANIES.filter(company => company.foundedBy === null);
   if (unfounded.length === 0 || !NATIONS) return;
 
-  const COOLDOWN_TURNS = 12;  // Reduced from 30
-  const MAX_PER_NATION = 5;   // Increased from 3
-  const MAX_GLOBAL_PER_TURN = 6;  // Increased from 2
+  const currentTurn = GAME?.turn || 0;
+  const COOLDOWN_TURNS = 10;
+  const MAX_GLOBAL_PER_TURN = 5;
   let globalFoundedThisTurn = 0;
 
-  const nationIds = Object.keys(NATIONS).sort((a, b) => {
-    const aHash = _dcHash(`${a}-${GAME?.turn || 0}`) % 10000;
-    const bHash = _dcHash(`${b}-${GAME?.turn || 0}`) % 10000;
-    return aHash - bHash;
-  });
+  // Sort nations by capability (highest first) so best nations get first pick
+  const nationIds = Object.keys(NATIONS)
+    .map(id => ({ id, capability: _defenseNationCapability(NATIONS[id]) }))
+    .sort((a, b) => b.capability - a.capability);
 
-  for (const nationId of nationIds) {
+  for (const { id: nationId, capability } of nationIds) {
     if (globalFoundedThisTurn >= MAX_GLOBAL_PER_TURN) break;
 
     const nation = NATIONS[nationId];
     if (!nation || nation.failedState) continue;
 
-    if (nation.lastDefCompanyFoundedTurn != null && ((GAME?.turn || 0) - nation.lastDefCompanyFoundedTurn) < COOLDOWN_TURNS) {
+    // Cooldown check
+    if (nation.lastDefCompanyFoundedTurn != null && (currentTurn - nation.lastDefCompanyFoundedTurn) < COOLDOWN_TURNS) {
       continue;
     }
 
+    // Check minimum capability threshold (gradual rollout)
+    const minCapability = _defenseMinCapabilityForFounding(currentTurn);
+    if (capability < minCapability) continue;
+
+    // Max companies check
     const ownedCount = DEFENSE_COMPANIES.filter(company => company.foundedBy === nationId).length;
-    if (ownedCount >= MAX_PER_NATION) continue;
+    const maxCompanies = _defenseMaxCompaniesForNation(nation);
+    if (ownedCount >= maxCompanies) continue;
 
-    const maxTier = _defenseMaxFoundingTier(nation);
-    if (maxTier <= 0) continue;
-
-    const eligible = unfounded.filter(company => {
-      const tier = company.foundingTier || 3;
-      return tier <= maxTier && _defenseTierResourceGate(nation, tier);
-    });
-    if (eligible.length === 0) continue;
-
-    const score = _defenseNationScore(nation);
-    const threshold = DEFENSE_FOUNDING_THRESHOLDS.find(entry => entry.tier === maxTier);
-    const excess = threshold ? Math.max(0, score - threshold.score) : 0;
-    // Increased probability significantly
-    const probability = clamp(excess * 0.15 + 0.08, 0.06, 0.35);
+    // Founding probability based on capability excess
+    const excess = capability - minCapability;
+    const probability = clamp(excess * 0.008 + 0.05, 0.04, 0.30);
     if (Math.random() > probability) continue;
 
-    const lowestTier = Math.min(...eligible.map(company => company.foundingTier || 3));
-    const sameTierCandidates = eligible.filter(company => (company.foundingTier || 3) === lowestTier);
-    const pickIndex = _dcHash(`${nationId}-${GAME?.turn || 0}-defense-company`) % sameTierCandidates.length;
-    const pick = sameTierCandidates[pickIndex];
+    // Pick a random unfounded company (no tier restrictions)
+    const pickIndex = _dcHash(`${nationId}-${currentTurn}-defense-company`) % unfounded.length;
+    const pick = unfounded[pickIndex];
     if (!pick) continue;
 
+    // Found the company
     pick.foundedBy = nationId;
-    pick.foundedTurn = GAME?.turn || 0;
-    pick.tier = 1;
-    pick.techLevel = clamp(Number(nation.techLevel || 1) * 0.8, 1.0, 10.0);
+    pick.foundedTurn = currentTurn;
+    pick.tier = 1;  // All companies start at tier 1, grow through research
+    pick.techLevel = clamp(Number(nation.techLevel || 1) * 0.85, 1.0, 10.0);
     pick.researchProgress = 0;
     pick.researchFocus = null;
     pick.equipment = [];
     pick.supplierRelations = [];
+    pick.maxEquipmentSlots = 6 + Math.floor(capability / 15);  // Better nations get more slots
 
+    // Seed with era-appropriate equipment based on nation's tech level
     const eraLabel = getEraForTechLevel(pick.techLevel).label;
     const eraKey = eraLabel === 'WW1 Era' ? 'ERA1' :
       eraLabel === 'Interwar' ? 'ERA2' :
@@ -1096,7 +1085,9 @@ function processDefenseCompanyFoundings() {
       eraLabel === 'Modern' ? 'ERA6' :
       eraLabel === 'Near Future' ? 'ERA7' : 'ERA8';
     const eraTemplates = EQUIPMENT_TEMPLATES[eraKey] || EQUIPMENT_TEMPLATES.ERA1;
+    
     const resourceScore = _defenseResourceScore(nation);
+    // All companies can produce any category - seed based on nation resources
     const starterCategories = resourceScore >= 70
       ? ['tank', 'fighter', 'missile', 'artillery', 'drone', 'rifle']
       : resourceScore >= 40
@@ -1129,7 +1120,7 @@ function processDefenseCompanyFoundings() {
     }
 
     pick.researchFocus = pick.equipment[0]?.cat || 'rifle';
-    nation.lastDefCompanyFoundedTurn = GAME?.turn || 0;
+    nation.lastDefCompanyFoundedTurn = currentTurn;
 
     if (typeof initDefenseCompanyFinancials === 'function') {
       initDefenseCompanyFinancials(pick);
@@ -1140,7 +1131,7 @@ function processDefenseCompanyFoundings() {
 
     const year = GAME?.date instanceof Date ? GAME.date.getFullYear() : '?';
     if (typeof addNews === 'function') {
-      addNews(`🏭 ${nation.flag || ''} ${nation.name} establishes ${pick.name} — ${_tierLabel(lowestTier)} contractor (${year})`, 'military');
+      addNews(`🏭 ${nation.flag || ''} ${nation.name} establishes ${pick.name} — defense contractor (tech T${pick.techLevel.toFixed(1)}, ${year})`, 'military');
     }
 
     globalFoundedThisTurn++;
