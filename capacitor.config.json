@@ -1,0 +1,6 @@
+{
+  "appId": "com.worldsimulator.game",
+  "appName": "World Simulator",
+  "webDir": "www",
+  "bundledWebRuntime": false
+}
