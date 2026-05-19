@@ -1493,7 +1493,8 @@ function processAIWarDecisions() {
     const evalResult = evaluateWarDecision(attackerId, defenderId);
     
     if (evalResult.decision === 'attack') {
-      const severity = Math.floor(4 + Math.random() * 5); // 4-8 severity, no border wars
+      // Severity range 2-7: allows small border skirmishes up to serious wars
+      const severity = Math.floor(2 + Math.random() * 6);
       const goal = Math.random() < 0.3 ? 'annex' : Math.random() < 0.5 ? 'conquer' : 'punish';
       if (declareWar(attackerId, defenderId, severity, goal)) {
         warsDeclared++;
@@ -1536,7 +1537,8 @@ function initWarSystem() {
     const id2 = nationIds.splice(idx2, 1)[0];
     
     if (id1 && id2) {
-      declareWar(id1, id2, 4 + Math.floor(Math.random() * 4), Math.random() < 0.5 ? 'conquer' : 'punish');
+      // Start at lower severity (2-5) so initial wars don't immediately devastate economies
+      declareWar(id1, id2, 2 + Math.floor(Math.random() * 4), Math.random() < 0.5 ? 'conquer' : 'punish');
     }
   }
 }

@@ -1563,6 +1563,54 @@ function processAllEconomicSystems() {
 
 // ─── UPDATE COMPANIES ─────────────────────────────────
 
+function maybeIssueWorldBankCompanyRescue(nation, company) {
+  if (!nation || !company || nation.failedState) return false;
+  if (Number(company.distressMonths || 0) < 6) return false;
+  const turn = Number(GAME?.turn || 0);
+  if (Number(company.nextWorldBankRescueTurn || 0) > turn) return false;
+
+  const activeLoanExists = Array.isArray(GAME?.worldBank?.loans)
+    ? GAME.worldBank.loans.some(loan => loan?.type === 'company_stability_support' && loan?.status === 'active' && loan?.borrowerId === nation.id)
+    : false;
+  if (activeLoanExists) return false;
+
+  const credit = typeof computeNationCreditScore === 'function' ? computeNationCreditScore(nation) : 45;
+  const distress = Math.max(0, Number(company.distressMonths || 0));
+  const requestedM = clamp(
+    Number(company.revenue || 0) * (1.7 + Math.min(1.2, distress * 0.08)) + Number(company.employees || 0) * 0.0012,
+    15,
+    280
+  );
+  const approvalChance = clamp(0.3 + credit * 0.007 + distress * 0.03 - Math.max(0, Number(nation.debtRatio || 0) - 110) * 0.002, 0.25, 0.92);
+  if (Math.random() > approvalChance) {
+    company.nextWorldBankRescueTurn = turn + 6;
+    return false;
+  }
+
+  const disbursedM = requestedM;
+  nation.treasury = Math.max(0, Number(nation.treasury || 0) + disbursedM);
+  company.cashReserves = Math.max(0, Number(company.cashReserves || 0) + disbursedM * 0.85);
+  company.revenue = Math.max(0.05, Number(company.revenue || 0) * (1 + clamp(0.03 + distress * 0.01, 0.03, 0.12)));
+  company.profitMargin = clamp(Number(company.profitMargin || 0.08) + 0.015, 0.02, 0.5);
+  company.growthRate = clamp(Number(company.growthRate || 0) + 0.01, -0.08, 0.14);
+  company.distressMonths = Math.max(0, Number(company.distressMonths || 0) - 4);
+  company.nextWorldBankRescueTurn = turn + 18;
+
+  if (typeof adjustNationDebtStockM === 'function') {
+    adjustNationDebtStockM(nation, disbursedM, 'worldbank_company_stability_support');
+  }
+  if (typeof recordNationFinanceFlow === 'function') {
+    recordNationFinanceFlow(nation, 'inflows', 'loan_proceeds', disbursedM, { note: `Company stabilization for ${getCompanyDisplayName(company)}`, context: 'worldbank-company-support' });
+  }
+  if (typeof addWorldBankTransaction === 'function') {
+    addWorldBankTransaction('company_stability_support', `wb_company_${turn}_${nation.id}_${company.id}`, nation.id, disbursedM, `${nation.flag || '🏳️'} ${nation.name} received $${disbursedM.toFixed(0)}M to stabilize ${getCompanyDisplayName(company)}.`);
+  }
+  if (typeof addNews === 'function') {
+    addNews(`🏦 World Bank Support: ${nation.flag || '🏳️'} ${nation.name} receives $${disbursedM.toFixed(0)}M to stabilize ${getCompanyDisplayName(company)} and preserve jobs.`, 'major');
+  }
+  return true;
+}
+
 function updateNationCompanies(nation) {
   initNationResources(nation);
   initNationMarketDynamics(nation);
@@ -1664,7 +1712,7 @@ function updateNationCompanies(nation) {
     const demandPriceMult = clamp(1 + (1 - supplyRatio) * 0.45, 0.45, 1.9);
     const sectorCount = sectorCompanyCounts[company.sector] || 1;
     const sameTypeCount = sectorTypeCounts[company.sector + '::' + (company.companyType || 'private')] || 1;
-    const competitionPenalty = clamp(Math.max(0, sectorCount - 7) * 0.004 + Math.max(0, sameTypeCount - 3) * 0.003, 0, 0.16);
+    const competitionPenalty = clamp(Math.max(0, sectorCount - 9) * 0.003 + Math.max(0, sameTypeCount - 4) * 0.0025, 0, 0.1);
     const marketPower = clamp((company.moat || 1.0) * (1 + (company.techTier || 1) * 0.03), 0.65, 2.5);
     
     // Sector-specific revenue modifiers from resources & research
@@ -1705,8 +1753,8 @@ function updateNationCompanies(nation) {
     const maxMonthlyGrowth = 0.08 * sizeGrowthDrag;
     const minMonthlyGrowth = -0.08;
     company.growthRate = clamp(
-      company.growthRate * Math.pow(0.7, cadenceMonths) +
-      (innovationBonus + eduBonus + sectorBonus + energyDrag + randomShock + typeDef.growthBias * 0.3 + spilloverBonus * 0.03) * sizeGrowthDrag * cadenceMonths,
+      company.growthRate * Math.pow(0.82, cadenceMonths) +
+      (innovationBonus + eduBonus + sectorBonus + energyDrag + randomShock + typeDef.growthBias * 0.38 + spilloverBonus * 0.038) * sizeGrowthDrag * cadenceMonths,
       minMonthlyGrowth, maxMonthlyGrowth
     );
     
@@ -1716,9 +1764,9 @@ function updateNationCompanies(nation) {
     const compoundedGrowth = Math.pow(Math.max(0.05, 1 + company.growthRate), cadenceMonths);
     company.revenue = Math.max(0.0005, company.revenue * compoundedGrowth * resourceMult * rMult * demandPriceMult * marketPower * (1 - competitionPenalty));
     const dominanceShare = company.revenue / Math.max(1, nationMonthlyGDP);
-    if (dominanceShare > 0.22) {
-      company.growthRate = clamp(company.growthRate - Math.min(0.03, (dominanceShare - 0.22) * 0.18), -0.08, maxMonthlyGrowth);
-      company.profitMargin = clamp(Number(company.profitMargin || 0.08) - Math.min(0.05, (dominanceShare - 0.22) * 0.12), 0.02, 0.5);
+    if (dominanceShare > 0.3) {
+      company.growthRate = clamp(company.growthRate - Math.min(0.02, (dominanceShare - 0.3) * 0.12), -0.08, maxMonthlyGrowth);
+      company.profitMargin = clamp(Number(company.profitMargin || 0.08) - Math.min(0.03, (dominanceShare - 0.3) * 0.08), 0.02, 0.5);
     }
     
     // Track resource consumption: resource-using sectors consume resources
@@ -1798,22 +1846,22 @@ function updateNationCompanies(nation) {
     // Company death (bankruptcy) — harder to kill if innovative
     const isHighTier = (company.techTier || 1) >= 3;
     const collapseThreshold = isHighTier ? 8 : 7;
-    if ((company.distressMonths > collapseThreshold && Math.random() < collapseRisk) || (company.growthRate < -0.14 && Math.random() < 0.08)) {
+    if ((company.distressMonths > (collapseThreshold + 2) && Math.random() < collapseRisk) || (company.growthRate < -0.18 && Math.random() < 0.05)) {
       companiesToRemove.push(company);
     }
     
     // Company growth: small → medium → large → corporation (faster if high-growth)
     const sizeGrowthMult = clamp(1 + company.growthRate * 3.4, 0.85, 2.8); // growth rate amplifies size upgrade odds
-    const smallUpgradeChance = 1 - Math.pow(1 - clamp(0.12 * sizeGrowthMult, 0, 0.7), cadenceMonths);
-    const mediumUpgradeChance = 1 - Math.pow(1 - clamp(0.09 * sizeGrowthMult, 0, 0.68), cadenceMonths);
-    const largeUpgradeChance = 1 - Math.pow(1 - clamp(0.06 * sizeGrowthMult, 0, 0.65), cadenceMonths);
-    if (company.size === 'small' && company.revenue > 3.5 && Math.random() < smallUpgradeChance) {
+    const smallUpgradeChance = 1 - Math.pow(1 - clamp(0.15 * sizeGrowthMult, 0, 0.75), cadenceMonths);
+    const mediumUpgradeChance = 1 - Math.pow(1 - clamp(0.11 * sizeGrowthMult, 0, 0.72), cadenceMonths);
+    const largeUpgradeChance = 1 - Math.pow(1 - clamp(0.08 * sizeGrowthMult, 0, 0.68), cadenceMonths);
+    if (company.size === 'small' && company.revenue > 2.8 && Math.random() < smallUpgradeChance) {
       company.size = 'medium';
       addNews(`📊 ${getCompanyDisplayName(company)} (${nation.name}) expands to medium business`, 'minor');
-    } else if (company.size === 'medium' && company.revenue > 11 && Math.random() < mediumUpgradeChance) {
+    } else if (company.size === 'medium' && company.revenue > 8.5 && Math.random() < mediumUpgradeChance) {
       company.size = 'large';
       addNews(`📈 ${getCompanyDisplayName(company)} (${nation.name}) becomes a large enterprise`, 'minor');
-    } else if (company.size === 'large' && company.revenue > 30 && Math.random() < largeUpgradeChance) {
+    } else if (company.size === 'large' && company.revenue > 24 && Math.random() < largeUpgradeChance) {
       company.size = 'corporation';
       if (!company.public && Math.random() > 0.4) {
         company.public = true;
@@ -1844,10 +1892,18 @@ function updateNationCompanies(nation) {
     if (company.marketCapHistory.length > 12) company.marketCapHistory.shift();
   });
 
+  const rescuedCompanyIds = new Set();
+  strugglingCompanies.forEach(company => {
+    if (maybeIssueWorldBankCompanyRescue(nation, company)) {
+      rescuedCompanyIds.add(company.id);
+    }
+  });
+
   // Competitive consolidation: distressed firms can be merged/acquired by stronger rivals.
   strugglingCompanies
     .sort((a, b) => Number(b.distressMonths || 0) - Number(a.distressMonths || 0))
     .forEach(target => {
+      if (rescuedCompanyIds.has(target.id)) return;
       if (companiesToRemove.includes(target)) return;
       const buyers = nation.companies
         .filter(candidate =>

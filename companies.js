@@ -340,12 +340,12 @@ function evaluateInputCoverage(nation, company, line, productDef) {
   productDef.inputs.forEach(input => {
     if (input.type === 'resource') {
       const localLevel = Number(nation.resourceData?.[input.id]?.level || 0);
-      const localCoverage = clamp(localLevel / (45 + input.intensity * 55), 0.15, 1);
+      const localCoverage = clamp(localLevel / (45 + input.intensity * 55), 0.25, 1);
       let totalCoverage = localCoverage;
       inputCost += input.intensity * 0.16;
       if (totalCoverage < 0.92) {
         const suppliers = getGlobalResourceSuppliers(input.id, nation.id);
-        const importCoverage = clamp(suppliers.reduce((sum, supplier) => sum + supplier.strength, 0) / 220, 0, 1 - totalCoverage);
+        const importCoverage = clamp(suppliers.reduce((sum, supplier) => sum + supplier.strength, 0) / 170, 0, 1 - totalCoverage);
         if (importCoverage > 0) {
           const leader = suppliers[0];
           imports.push({
@@ -358,7 +358,7 @@ function evaluateInputCoverage(nation, company, line, productDef) {
           totalCoverage += importCoverage;
         }
       }
-      coverage *= clamp(totalCoverage, 0.2, 1);
+      coverage *= clamp(totalCoverage, 0.4, 1);
       return;
     }
 
@@ -368,11 +368,11 @@ function evaluateInputCoverage(nation, company, line, productDef) {
         const supplierLine = candidate.productLines.find(item => item.productId === input.id);
         return sum + Math.max(0.1, Number(supplierLine?.techLevel || 1) * 0.18 + Number(candidate.revenue || 0) * 0.02);
       }, 0);
-      let totalCoverage = clamp(localStrength / 18, 0, 1);
+      let totalCoverage = clamp(localStrength / 14, 0, 1);
       inputCost += input.intensity * 0.14;
       if (totalCoverage < 0.95) {
         const suppliers = getGlobalProductSuppliers(input.id, company.id);
-        const importCoverage = clamp(suppliers.reduce((sum, supplier) => sum + supplier.strength, 0) / 26, 0, 1 - totalCoverage);
+        const importCoverage = clamp(suppliers.reduce((sum, supplier) => sum + supplier.strength, 0) / 20, 0, 1 - totalCoverage);
         if (importCoverage > 0) {
           const leader = suppliers[0];
           imports.push({
@@ -385,13 +385,13 @@ function evaluateInputCoverage(nation, company, line, productDef) {
           totalCoverage += importCoverage;
         }
       }
-      coverage *= clamp(totalCoverage, 0.12, 1);
+      coverage *= clamp(totalCoverage, 0.35, 1);
     }
   });
 
   line.imports = imports;
   return {
-    coverage: clamp(coverage, 0.08, 1),
+    coverage: clamp(coverage, 0.25, 1),
     importCost,
     inputCost,
   };
@@ -483,7 +483,7 @@ function processCompanyProductEngine(nation) {
       const lineRevenueBase = baselineRevenue * productDef.valueShare / Math.max(1, company.productLines.length);
       const targetOutput = lineRevenueBase * demandPulse * educationFit * competition.marketCapture * brandNetworkBoost;
       const supplyPurchase = acquireCompanyInputMaterials(nation, company, productDef, targetOutput);
-      const effectiveCoverage = clamp(inputResult.coverage * (0.45 + supplyPurchase.coverage * 0.55), 0.05, 1);
+      const effectiveCoverage = clamp(inputResult.coverage * (0.55 + supplyPurchase.coverage * 0.45), 0.22, 1);
       const realizedRevenue = lineRevenueBase * demandPulse * educationFit * effectiveCoverage * competition.marketCapture * brandNetworkBoost * innovationScore;
 
       line.monthlyDemand = lineRevenueBase * demandPulse;
@@ -526,9 +526,9 @@ function processCompanyProductEngine(nation) {
     }
 
     const marginHit = (totalImportCost / Math.max(1, company.revenue || 1)) * 0.62 + (totalResearchSpend / Math.max(1, company.revenue || 1)) * 0.35;
-    const marginRecovery = clamp((innovationScore - 1) * 0.018 + (1 - maxBottleneck) * 0.01, -0.01, 0.03);
+    const marginRecovery = clamp((innovationScore - 1) * 0.02 + (1 - maxBottleneck) * 0.02, -0.008, 0.04);
     company.profitMargin = clamp(Number(company.profitMargin || 0.08) - marginHit + marginRecovery, 0.03, 0.5);
-    const growthImpulse = ((innovationScore - 1) * 0.004 - maxBottleneck * 0.02 + (company.productLines.reduce((sum, line) => sum + (Number(line.techLevel || 1) - 1), 0) / Math.max(1, company.productLines.length)) * 0.002) * cadenceMonths;
+    const growthImpulse = ((innovationScore - 1) * 0.0045 - maxBottleneck * 0.01 + (company.productLines.reduce((sum, line) => sum + (Number(line.techLevel || 1) - 1), 0) / Math.max(1, company.productLines.length)) * 0.0022) * cadenceMonths;
     company.growthRate = clamp(Number(company.growthRate || 0) + growthImpulse, -0.08, 0.11);
     company.primaryProduct = company.productLines.slice().sort((a, b) => Number(b.monthlySupply || 0) - Number(a.monthlySupply || 0))[0]?.productId || null;
     if (typeof estimateCompanyWorth === 'function') {

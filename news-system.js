@@ -24,7 +24,26 @@ const NEWS_STATE = {
   activeFilter: 'all',
   browserFilter: 'all',
   browserSearch: '',
+  uiPending: false,
+  uiFlushTimer: null,
+  uiFlushDelayMs: 120,
 };
+
+function flushNewsUiIfPending() {
+  if (!NEWS_STATE.uiPending) return;
+  NEWS_STATE.uiPending = false;
+  renderNewsTicker();
+  rerenderNewsBrowserIfOpen();
+}
+
+function scheduleNewsUiRefresh() {
+  NEWS_STATE.uiPending = true;
+  if (NEWS_STATE.uiFlushTimer) return;
+  NEWS_STATE.uiFlushTimer = setTimeout(() => {
+    NEWS_STATE.uiFlushTimer = null;
+    flushNewsUiIfPending();
+  }, NEWS_STATE.uiFlushDelayMs);
+}
 
 function inferNewsCategory(title) {
   const txt = String(title || '').toLowerCase();
@@ -291,8 +310,7 @@ function addNews(input, type = 'minor', options = undefined) {
   const item = normalizeNewsInput(input, type, options);
   NEWS_STATE.items.unshift(item);
   if (NEWS_STATE.items.length > NEWS_STATE.maxItems) NEWS_STATE.items.length = NEWS_STATE.maxItems;
-  renderNewsTicker();
-  rerenderNewsBrowserIfOpen();
+  scheduleNewsUiRefresh();
   return item;
 }
 
@@ -405,7 +423,8 @@ function attachNewsCenterListeners(root) {
 }
 
 function refreshNewsUi() {
-  renderNewsTicker();
+  NEWS_STATE.uiPending = true;
+  flushNewsUiIfPending();
 }
 
 window.addNews = addNews;
@@ -417,4 +436,5 @@ window.renderNewsBrowserTab = renderNewsBrowserTab;
 window.attachNewsBrowserListeners = attachNewsBrowserListeners;
 window.getNewsItems = getNewsItems;
 window.refreshNewsUi = refreshNewsUi;
+window.flushNewsUiIfPending = flushNewsUiIfPending;
 window.NEWS_CATEGORIES = NEWS_CATEGORIES;

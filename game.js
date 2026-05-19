@@ -88,9 +88,14 @@ const GAME = {
   perf: {
     renderIntervalMs: 130,
     tabRenderIntervalMs: 180,
+    baseRenderIntervalMs: 130,
+    baseTabRenderIntervalMs: 180,
     lastUiRenderAt: 0,
     lastTabRenderAt: 0,
     nationCardRenderEveryTurns: 1,
+    lowFpsMode: false,
+    simTurnAvgMs: 0,
+    adaptiveEnabled: true,
     profileEveryTurns: 20,
     profileRolling: {},
   },
@@ -109,6 +114,11 @@ const SIM_TICK = {
 function nowMs() {
   if (typeof performance !== 'undefined' && typeof performance.now === 'function') return performance.now();
   return Date.now();
+}
+
+function isMobileDevice() {
+  const ua = typeof navigator !== 'undefined' ? String(navigator.userAgent || '') : '';
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
 }
 
 function markUiDirty(reason = 'turn') {
@@ -191,6 +201,11 @@ function rebuildTurnCache() {
     aliveNations: [],
     aliveNationIds: new Set(),
     creditByNation: {},
+    resilienceByNation: {},
+    lendingPowerByNation: {},
+    boomPhaseByNation: {},
+    warPressureByNation: {},
+    allianceSupportByNation: {},
     diplomacyPowerByNation: {},
     financeByNation: {},
     alliancePartnersByNation: {},
@@ -280,6 +295,43 @@ function setCachedFinanceSnapshot(nationId, snapshot) {
 function getCachedFinanceSnapshot(nationId) {
   const cache = getTurnCache();
   return cache.financeByNation[nationId] || null;
+}
+
+function getCachedResilience(nationId) {
+  if (!nationId) return null;
+  const cache = getTurnCache();
+  return Number.isFinite(cache.resilienceByNation[nationId]) ? cache.resilienceByNation[nationId] : null;
+}
+
+function setCachedResilience(nationId, value) {
+  if (!nationId) return;
+  const cache = getTurnCache();
+  cache.resilienceByNation[nationId] = value;
+}
+
+function getCachedLendingPower(nationId) {
+  if (!nationId) return null;
+  const cache = getTurnCache();
+  return Number.isFinite(cache.lendingPowerByNation[nationId]) ? cache.lendingPowerByNation[nationId] : null;
+}
+
+function setCachedLendingPower(nationId, value) {
+  if (!nationId) return;
+  const cache = getTurnCache();
+  cache.lendingPowerByNation[nationId] = value;
+}
+
+function getCachedBoomPhase(nationId) {
+  if (!nationId) return null;
+  const cache = getTurnCache();
+  const value = cache.boomPhaseByNation[nationId];
+  return value && typeof value === 'object' ? value : null;
+}
+
+function setCachedBoomPhase(nationId, value) {
+  if (!nationId || !value || typeof value !== 'object') return;
+  const cache = getTurnCache();
+  cache.boomPhaseByNation[nationId] = value;
 }
 
 // ============================================================
@@ -1199,7 +1251,11 @@ function relationshipKey(a, b) {
 
 function getWarPressure(nationId) {
   const cache = GAME.turnCache;
+  if (cache && cache.turn === GAME.turn && Number.isFinite(cache.warPressureByNation?.[nationId])) {
+    return cache.warPressureByNation[nationId];
+  }
   if (cache && cache.turn === GAME.turn && cache.warInvolvedNations && !cache.warInvolvedNations.has(nationId)) {
+    if (cache.warPressureByNation) cache.warPressureByNation[nationId] = 0;
     return 0;
   }
 
@@ -1213,20 +1269,31 @@ function getWarPressure(nationId) {
       pressure += 1 + (intensity / 120);
     }
   }
+  if (cache && cache.turn === GAME.turn && cache.warPressureByNation) {
+    cache.warPressureByNation[nationId] = pressure;
+  }
   return pressure;
 }
 
 function getAllianceSupport(nationId) {
   const cache = GAME.turnCache;
+  if (cache && cache.turn === GAME.turn && Number.isFinite(cache.allianceSupportByNation?.[nationId])) {
+    return cache.allianceSupportByNation[nationId];
+  }
   if (cache && cache.turn === GAME.turn && cache.alliancePartnersByNation) {
     const partners = cache.alliancePartnersByNation[nationId] || [];
-    if (!partners.length) return 0;
+    if (!partners.length) {
+      if (cache.allianceSupportByNation) cache.allianceSupportByNation[nationId] = 0;
+      return 0;
+    }
     const strengthByPartner = {};
     for (const alliance of GAME.alliances) {
       if (alliance.a === nationId) strengthByPartner[alliance.b] = alliance.strength;
       else if (alliance.b === nationId) strengthByPartner[alliance.a] = alliance.strength;
     }
-    return partners.reduce((sum, partnerId) => sum + 1 + ((strengthByPartner[partnerId] || 50) / 180), 0);
+    const support = partners.reduce((sum, partnerId) => sum + 1 + ((strengthByPartner[partnerId] || 50) / 180), 0);
+    if (cache.allianceSupportByNation) cache.allianceSupportByNation[nationId] = support;
+    return support;
   }
 
   let support = 0;
@@ -1234,6 +1301,9 @@ function getAllianceSupport(nationId) {
     if (alliance.a === nationId || alliance.b === nationId) {
       support += 1 + (alliance.strength / 180);
     }
+  }
+  if (cache && cache.turn === GAME.turn && cache.allianceSupportByNation) {
+    cache.allianceSupportByNation[nationId] = support;
   }
   return support;
 }
@@ -1361,8 +1431,9 @@ function processGlobalMarketCycle() {
 function processAlliancesAndConflicts() {
   const advancedWarEnabled = typeof processAllWars === 'function';
 
-  // Form alliances among relatively stable states.
-  for (let i = 0; i < 4; i++) {
+  // ── ALLIANCE FORMATION ────────────────────────────────
+  // Pass 1: Random sampling (increased from 4→20 to cover more of the ~16k possible pairs)
+  for (let i = 0; i < 20; i++) {
     const a = pickRandomNationId();
     const b = pickRandomNationId([a]);
     if (!a || !b) continue;
@@ -1370,15 +1441,47 @@ function processAlliancesAndConflicts() {
     const nb = NATIONS[b];
     if (na.failedState || nb.failedState || hasConflict(a, b) || hasAlliance(a, b)) continue;
 
-    const allianceChance = (
+    const rel = typeof getRelationBetween === 'function' ? getRelationBetween(a, b) : 0;
+    // Bilateral relation is the primary driver — nations that like each other seek alliances
+    const relationBonus = clamp(rel * 0.003, -0.05, 0.18);
+    const allianceChance = clamp(
       ((na.governance + nb.governance) / 200) * 0.09 +
       ((na.stability + nb.stability) / 200) * 0.06 +
-      ((na.happiness + nb.happiness) / 200) * 0.04
+      ((na.happiness + nb.happiness) / 200) * 0.04 +
+      relationBonus,
+      0, 0.55
     );
 
     if (Math.random() < allianceChance) {
       addAlliance(a, b);
       if (Math.random() < 0.35) addNews(`🤝 ${na.name} and ${nb.name} sign a strategic alliance`, 'minor');
+    }
+  }
+
+  // Pass 2: Active alliance-seeking — nations with good bilateral relations (>35) proactively ally
+  // Runs every 3 turns to avoid spam; samples a subset of nation pairs with high relation
+  if (GAME.turn % 3 === 0) {
+    const aliveIds = Object.keys(NATIONS).filter(id => !NATIONS[id].failedState);
+    const checked = new Set();
+    for (const aId of aliveIds) {
+      if (typeof getFriendlyNationIds !== 'function') break;
+      const friends = getFriendlyNationIds(aId, 35);
+      for (const bId of friends) {
+        const pairKey = [aId, bId].sort().join('::');
+        if (checked.has(pairKey)) continue;
+        checked.add(pairKey);
+        if (hasAlliance(aId, bId) || hasConflict(aId, bId)) continue;
+        const na = NATIONS[aId];
+        const nb = NATIONS[bId];
+        if (!na || !nb || na.failedState || nb.failedState) continue;
+        const rel = getRelationBetween(aId, bId);
+        // High-relation nations have a meaningful chance to formalize an alliance each cycle
+        const allyChance = clamp((rel - 30) * 0.004 + 0.04, 0, 0.30);
+        if (Math.random() < allyChance) {
+          addAlliance(aId, bId);
+          if (Math.random() < 0.4) addNews(`🤝 ${na.name} and ${nb.name} formalize a strategic partnership`, 'minor');
+        }
+      }
     }
   }
 
@@ -1592,6 +1695,10 @@ function processAllianceLending() {
 
 function computeNationResilience(nation) {
   if (!nation) return 0;
+  if (nation.id) {
+    const cached = getCachedResilience(nation.id);
+    if (cached !== null) return cached;
+  }
   const govProfile = getGovernmentProfile(nation.governmentStyle);
   const religionDrag = clamp(nation.religionInfluence * 0.004, 0, 0.4);
   const govStabilityBonus = govProfile.stabilityBoost || 1.0;
@@ -1617,11 +1724,13 @@ function computeNationResilience(nation) {
   const govEducationSynergy = (nation.governance > 55 && nation.education > 55) ? 5 : 0;
   const religionGovernancePenalty = religionDrag * (nation.governance < 45 ? 8 : 3);
 
-  return clamp(
+  const resilience = clamp(
     (foundation - penalties * 0.15 + 15) * govStabilityBonus +
     educationEnvSynergy + govEducationSynergy - religionGovernancePenalty,
     1, 100
   );
+  if (nation.id) setCachedResilience(nation.id, resilience);
+  return resilience;
 }
 
 function computeNationHappiness(nation) {
@@ -1730,6 +1839,10 @@ function computeNationCreditScore(nation) {
  */
 function computeNationLendingPower(nation) {
   if (!nation || nation.failedState) return 0;
+  if (nation.id) {
+    const cached = getCachedLendingPower(nation.id);
+    if (cached !== null) return cached;
+  }
 
   const creditScore = computeNationCreditScore(nation) / 100;
   const gdpScale = clamp(nation.gdp / 5, 0.2, 8);
@@ -1744,7 +1857,9 @@ function computeNationLendingPower(nation) {
   const warPenalty = getWarPressure(nation.id || '') > 0.5 ? 0.5 : 1;
   const crisisPenalty = nation.inCrisis ? 0.4 : 1;
 
-  return clamp(baseLendingPower * warPenalty * crisisPenalty, 0, 80);
+  const lendingPower = clamp(baseLendingPower * warPenalty * crisisPenalty, 0, 80);
+  if (nation.id) setCachedLendingPower(nation.id, lendingPower);
+  return lendingPower;
 }
 
 /**
@@ -1770,7 +1885,16 @@ function computeLendingInterestRate(borrowerNation) {
  * A "boom" requires good leadership, educated populace, stable government, and healthy environment.
  */
 function computeBoomPhase(nation) {
-  if (!nation || nation.failedState) return { phase: 'collapse', momentum: -0.8, boomRisk: 0 };
+  if (!nation) return { phase: 'collapse', momentum: -0.8, boomRisk: 0 };
+  if (nation.failedState) {
+    const failed = { phase: 'collapse', momentum: -0.8, boomRisk: 0 };
+    if (nation.id) setCachedBoomPhase(nation.id, failed);
+    return failed;
+  }
+  if (nation.id) {
+    const cached = getCachedBoomPhase(nation.id);
+    if (cached) return cached;
+  }
 
   const govProfile = getGovernmentProfile(nation.governmentStyle);
   const educationFactor = clamp(nation.education / 50, 0.4, 1.6);
@@ -1819,7 +1943,9 @@ function computeBoomPhase(nation) {
     ? clamp((constrainedMomentum - 0.6) * 2.5 + (nation.inflation > 5 ? 0.2 : 0) + (nation.inequality > 55 ? 0.15 : 0), 0, 0.85)
     : 0;
 
-  return { phase, momentum: constrainedMomentum, boomRisk };
+  const boom = { phase, momentum: constrainedMomentum, boomRisk };
+  if (nation.id) setCachedBoomPhase(nation.id, boom);
+  return boom;
 }
 
 function getBoomPhaseEmoji(phase) {
@@ -2411,10 +2537,12 @@ function runCountrySystemModel(nation, isPlayer = false, nationId = null) {
   // ── JOBS ──────────────────────────────────────────────
   // DIMINISHING RETURNS: harder to create jobs when employment is already high
   const jobsDiminish = clamp(1.0 - (nation.jobs / 100) * 0.88, 0.12, 1.0);
+  // Jobs GDP factor: smooth ramp instead of hard cliff (no poverty trap at $5T)
+  const jobsGdpFactor = clamp((nation.gdp - 1.5) * 0.025, -0.055, 0.08);
   nation.jobs = clamp(
     nation.jobs +
-    ((nation.factories - 50) * 0.008 +
-     (nation.gdp > 5 ? 0.06 : -0.08) -
+    ((nation.factories - 50) * 0.005 +
+     jobsGdpFactor -
      (nation.population > 280 ? 0.08 : 0) -
      warPressure * 0.18 +
      econ * 0.4 +
@@ -2633,16 +2761,18 @@ function runCountrySystemModel(nation, isPlayer = false, nationId = null) {
   }
 
   // ── DEFICIT MODEL ─────────────────────────────────────
+  // Coefficients calibrated so a balanced-budget stable nation (GDP≈2T, governance≈50)
+  // runs near-zero deficit. Poor governance/high corruption cause realistic deficits.
   const revenueStrength =
     (nation.gdp / 70) +
     (nation.governance - 50) * 0.02 +
     econ * 1.8 +
     diplomacy * 0.45;
   const spendingPressure =
-    military * 3.8 +
-    social * 3.0 +
-    education * 2.6 +
-    intel * 1.8 +
+    military * 1.05 +
+    social * 0.82 +
+    education * 0.70 +
+    intel * 0.50 +
     warPressure * 0.6 +
     (nation.corruption - 35) * 0.02;
 
@@ -3421,6 +3551,10 @@ function refreshSimulationUi() {
     safeRun('refreshRealtimeTabs', () => refreshRealtimeTabs());
   }
 
+  if (typeof flushNewsUiIfPending === 'function') {
+    safeRun('flushNewsUiIfPending', () => flushNewsUiIfPending());
+  }
+
   GAME.uiDirty = false;
   GAME.uiDirtyReason = 'idle';
 }
@@ -3623,8 +3757,56 @@ function stopSimulationTimer() {
   }
 }
 
+function applyCadenceForSpeed(speed) {
+  const isMobile = isMobileDevice();
+  const baseRender = isMobile
+    ? (speed >= 10 ? 320 : speed >= 5 ? 250 : 190)
+    : (speed >= 10 ? 180 : speed >= 5 ? 130 : 95);
+  const baseTab = Math.max(isMobile ? 380 : 220, baseRender + (isMobile ? 100 : 50));
+
+  GAME.perf.baseRenderIntervalMs = baseRender;
+  GAME.perf.baseTabRenderIntervalMs = baseTab;
+  if (!GAME.perf.lowFpsMode) {
+    GAME.perf.renderIntervalMs = baseRender;
+    GAME.perf.tabRenderIntervalMs = baseTab;
+    GAME.perf.nationCardRenderEveryTurns = 1;
+  }
+}
+
+function tuneAdaptivePerf(turnElapsedMs) {
+  if (!GAME.perf.adaptiveEnabled || !Number.isFinite(turnElapsedMs)) return;
+
+  const perf = GAME.perf;
+  perf.simTurnAvgMs = perf.simTurnAvgMs > 0
+    ? perf.simTurnAvgMs * 0.82 + turnElapsedMs * 0.18
+    : turnElapsedMs;
+
+  const isMobile = isMobileDevice();
+  const heavyTurn = turnElapsedMs > (isMobile ? 70 : 55) || perf.simTurnAvgMs > (isMobile ? 48 : 38);
+  const recovered = turnElapsedMs < (isMobile ? 42 : 32) && perf.simTurnAvgMs < (isMobile ? 35 : 28);
+
+  if (heavyTurn && !perf.lowFpsMode) {
+    perf.lowFpsMode = true;
+    perf.renderIntervalMs = Math.max(perf.baseRenderIntervalMs || perf.renderIntervalMs, isMobile ? 360 : 210);
+    perf.tabRenderIntervalMs = Math.max(perf.baseTabRenderIntervalMs || perf.tabRenderIntervalMs, isMobile ? 500 : 280);
+    perf.nationCardRenderEveryTurns = isMobile ? 2 : 1;
+    return;
+  }
+
+  if (recovered && perf.lowFpsMode) {
+    perf.lowFpsMode = false;
+    perf.renderIntervalMs = perf.baseRenderIntervalMs || perf.renderIntervalMs;
+    perf.tabRenderIntervalMs = perf.baseTabRenderIntervalMs || perf.tabRenderIntervalMs;
+    perf.nationCardRenderEveryTurns = 1;
+  }
+}
+
 function getSimulationInterval(speed) {
-  return Math.max(40, 1000 / Math.max(1, speed));
+  const mobileFloor = 125;
+  const desktopFloor = 75;
+  const isMobile = isMobileDevice();
+  const floor = isMobile ? mobileFloor : desktopFloor;
+  return Math.max(floor, 1000 / Math.max(1, speed));
 }
 
 function scheduleNextTurn() {
@@ -3637,6 +3819,7 @@ function scheduleNextTurn() {
 }
 
 function safelySimulateTurn() {
+  const started = nowMs();
   try {
     simulateTurn();
     return true;
@@ -3644,6 +3827,8 @@ function safelySimulateTurn() {
     console.error('Simulation turn failed:', error);
     refreshSimulationUi();
     return false;
+  } finally {
+    tuneAdaptivePerf(nowMs() - started);
   }
 }
 
@@ -3661,7 +3846,6 @@ function runScheduledTurn(generation) {
     safelySimulateTurn();
   } finally {
     GAME.turnInProgress = false;
-    refreshSimulationUi();
     scheduleNextTurn();
   }
 }
@@ -3682,8 +3866,8 @@ function setSimulationSpeed(speed) {
     }
   }
 
-  GAME.perf.renderIntervalMs = speed >= 10 ? 125 : speed >= 5 ? 100 : 80;
-  GAME.perf.tabRenderIntervalMs = Math.max(150, GAME.perf.renderIntervalMs + 40);
+  GAME.perf.lowFpsMode = false;
+  applyCadenceForSpeed(speed);
   markUiDirty('speed-change');
   refreshSimulationUi();
 

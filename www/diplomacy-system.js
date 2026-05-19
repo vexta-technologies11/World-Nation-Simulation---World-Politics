@@ -16,6 +16,7 @@ function initDiplomacyState() {
       investments: {},      // { "nationA_nationB": { amount, turn, companies: [], expectedReturn } }
       diplomaticEvents: [], // Recent events for UI
       coalitions: [],       // Active coalitions
+      bilateralLoans: [],   // { id, lenderId, borrowerId, principalM, interestRate, paymentPerTurnM, turnsRemaining, totalPaidM, issuedTurn }
     };
   }
   if (!GAME.diplomacyState.sanctions) GAME.diplomacyState.sanctions = {};
@@ -45,6 +46,79 @@ function getAliveDiplomacyNations() {
     return cache.aliveNations;
   }
   return Object.values(NATIONS).filter(n => !n.failedState);
+}
+
+function getNationTreasuryM(nation) {
+  if (!nation) return 0;
+  return Math.max(0, Number(nation.id === GAME.playerNation?.id ? GAME.treasury : nation.treasury || 0));
+}
+
+function applyNationTreasuryDeltaM(nation, deltaM) {
+  if (!nation || !Number.isFinite(deltaM)) return;
+  if (nation.id === GAME.playerNation?.id) {
+    GAME.treasury = Math.max(0, Number(GAME.treasury || 0) + deltaM);
+  } else {
+    nation.treasury = Math.max(0, Number(nation.treasury || 0) + deltaM);
+  }
+}
+
+function createDiplomaticInvestment(investor, target, requestedAmountB, options = {}) {
+  initDiplomacyState();
+  if (!investor || !target || investor.id === target.id) return null;
+  if (investor.failedState || target.failedState) return null;
+
+  const capacityShare = clamp(Number(options.capacityShare ?? 0.35), 0.05, 0.9);
+  const minAmountB = Math.max(0.01, Number(options.minAmountB ?? 0.1));
+  const donorTreasuryM = getNationTreasuryM(investor);
+  const maxByCapacityB = (donorTreasuryM * capacityShare) / 1000;
+  const amountB = Math.max(0, Math.min(Number(requestedAmountB || 0), maxByCapacityB));
+  if (amountB < minAmountB) return null;
+
+  const amountM = amountB * 1000;
+  if (donorTreasuryM < amountM) return null;
+
+  applyNationTreasuryDeltaM(investor, -amountM);
+  applyNationTreasuryDeltaM(target, amountM);
+
+  investor.gdp = clamp(Number(investor.gdp || 0.2) - amountB * 0.005, 0.05, 100);
+  target.gdp = clamp(Number(target.gdp || 0.2) + amountB * 0.015, 0.05, 100);
+
+  const key = relationshipKey(investor.id, target.id);
+  const expectedReturn = amountB * (1.2 + Math.random() * 0.5);
+  const maturityTurn = GAME.turn + Math.max(1, Number(options.maturityTurns || 10));
+  const companies = target.companies?.slice(0, 3).map(c => c.name) || ['Various'];
+  const existing = GAME.diplomacyState.investments[key];
+
+  if (existing) {
+    existing.amount = Number(existing.amount || 0) + amountB;
+    existing.expectedReturn = Number(existing.expectedReturn || 0) + expectedReturn;
+    existing.maturityTurn = Math.max(Number(existing.maturityTurn || 0), maturityTurn);
+    existing.turn = GAME.turn;
+    existing.companies = Array.from(new Set([...(existing.companies || []), ...companies])).slice(0, 6);
+  } else {
+    GAME.diplomacyState.investments[key] = {
+      amount: amountB,
+      turn: GAME.turn,
+      expectedReturn,
+      maturityTurn,
+      companies,
+    };
+  }
+
+  if (typeof recordNationFinanceFlow === 'function') {
+    recordNationFinanceFlow(investor, 'outflows', 'foreign_investment', amountM, {
+      note: 'Cross-border investment deployed',
+      counterparty: target.name,
+      context: options.context || 'diplomacy-investment',
+    });
+    recordNationFinanceFlow(target, 'inflows', 'foreign_investment', amountM, {
+      note: 'Foreign capital inflow',
+      counterparty: investor.name,
+      context: options.context || 'diplomacy-investment',
+    });
+  }
+
+  return { key, amountB, companies };
 }
 
 function getFriendlyNationIds(nationId, minRelation = 20) {
@@ -194,30 +268,42 @@ function processActiveDiplomacy() {
     // Build detailed news message with investment breakdown for successful visits
     let detailedMessage = '';
     if (success && (eventType === 'state_visit' || eventType === 'summit')) {
-      // Generate investment details for successful high-level diplomacy
-      const investmentAmount = clamp(gdp * (0.02 + Math.random() * 0.05), 0.05, 2.0);
-      const targetCompanies = target.companies || [];
-      const investmentBreakdown = [];
-      
-      if (targetCompanies.length > 0) {
-        const selectedCompanies = targetCompanies.slice(0, Math.min(3, targetCompanies.length));
-        let remaining = investmentAmount;
-        selectedCompanies.forEach((company, idx) => {
-          const share = idx === selectedCompanies.length - 1 ? remaining : remaining * (0.3 + Math.random() * 0.3);
-          investmentBreakdown.push({ company: company.name || 'Company', amount: share });
-          remaining -= share;
-        });
+      // Successful high-level diplomacy now wires a real treasury investment flow.
+      const requestedAmount = gdp * (0.02 + Math.random() * 0.05);
+      const wiredInvestment = createDiplomaticInvestment(nation, target, requestedAmount, {
+        capacityShare: 0.22,
+        minAmountB: 0.05,
+        maturityTurns: 10,
+        context: 'diplomatic-visit-investment',
+      });
+
+      if (wiredInvestment) {
+        const investmentAmount = wiredInvestment.amountB;
+        const targetCompanies = target.companies || [];
+        const investmentBreakdown = [];
+
+        if (targetCompanies.length > 0) {
+          const selectedCompanies = targetCompanies.slice(0, Math.min(3, targetCompanies.length));
+          let remaining = investmentAmount;
+          selectedCompanies.forEach((company, idx) => {
+            const share = idx === selectedCompanies.length - 1 ? remaining : remaining * (0.3 + Math.random() * 0.3);
+            investmentBreakdown.push({ company: company.name || 'Company', amount: share });
+            remaining -= share;
+          });
+        }
+
+        const breakdownStr = investmentBreakdown.map(ib => `${ib.company}=$${(ib.amount * 1000).toFixed(0)}M`).join(', ');
+        const promiseAid = Math.random() < 0.4;
+        const promiseLoan = Math.random() < 0.3;
+
+        detailedMessage = `${nation.flag} President ${nation.leader} visited ${target.flag} ${target.name} and closed investment deals worth $${(investmentAmount * 1000).toFixed(0)}M`;
+        if (breakdownStr) detailedMessage += ` (${breakdownStr})`;
+        if (promiseAid) detailedMessage += `, promised crisis assistance`;
+        if (promiseLoan) detailedMessage += `, and offered loan support`;
+        detailedMessage += '.';
+      } else {
+        detailedMessage = `${nation.flag} ${nation.name} and ${target.flag} ${target.name} held high-level talks on investment cooperation.`;
       }
-      
-      const breakdownStr = investmentBreakdown.map(ib => `${ib.company}=$${(ib.amount * 1000).toFixed(0)}M`).join(', ');
-      const promiseAid = Math.random() < 0.4;
-      const promiseLoan = Math.random() < 0.3;
-      
-      detailedMessage = `${nation.flag} President ${nation.leader} visited ${target.flag} ${target.name} and made deals worth $${(investmentAmount * 1000).toFixed(0)}M`;
-      if (breakdownStr) detailedMessage += ` (${breakdownStr})`;
-      if (promiseAid) detailedMessage += `, promised crisis assistance`;
-      if (promiseLoan) detailedMessage += `, and offered loan support`;
-      detailedMessage += '.';
     }
     
     // Diplomatic event descriptions
@@ -545,48 +631,26 @@ function processInvestmentFlows() {
     // Check if already invested
     if (GAME.diplomacyState.investments[key]) return;
     
-    // Investment amount
-    const investAmount = clamp(gdp * (0.03 + Math.random() * 0.08), 0.1, 3.0);
-    const expectedReturn = investAmount * (1.2 + Math.random() * 0.5);  // 20-70% return
-    const investAmountM = investAmount * 1000;
-    const donorTreasury = Math.max(0, Number(nation.id === GAME.playerNation?.id ? GAME.treasury : nation.treasury || 0));
-    if (donorTreasury < investAmountM) return;
-    
-    GAME.diplomacyState.investments[key] = {
-      amount: investAmount,
-      turn: GAME.turn,
-      expectedReturn,
-      maturityTurn: GAME.turn + 10,  // 10 turns maturity
-      companies: target.companies?.slice(0, 3).map(c => c.name) || ['Various']
-    };
-    
-    // Economic impact
-    if (nation.id === GAME.playerNation?.id) {
-      GAME.treasury -= investAmountM;
-    } else {
-      nation.treasury = donorTreasury - investAmountM;
-    }
-    target.treasury = Math.max(0, Number(target.treasury || 0) + investAmountM);
-    nation.gdp = clamp(nation.gdp - investAmount * 0.005, 0.05, 100);  // Small initial cost
-    target.gdp = clamp(target.gdp + investAmount * 0.015, 0.05, 100);  // Boost for receiver
-    if (typeof recordNationFinanceFlow === 'function') {
-      recordNationFinanceFlow(nation, 'outflows', 'foreign_investment', investAmountM, {
-        note: 'Cross-border investment deployed',
-        counterparty: target.name,
-        context: 'diplomacy-investment',
-      });
-      recordNationFinanceFlow(target, 'inflows', 'foreign_investment', investAmountM, {
-        note: 'Foreign capital inflow',
-        counterparty: nation.name,
-        context: 'diplomacy-investment',
-      });
-    }
+    // Investment amount now scales with investor capacity (treasury), no fixed hard cap.
+    const donorTreasuryM = getNationTreasuryM(nation);
+    const requestedAmount = gdp * (0.03 + Math.random() * 0.08);
+    const dynamicCapacityCap = (donorTreasuryM * 0.35) / 1000;
+    const investAmount = Math.max(0, Math.min(requestedAmount, dynamicCapacityCap));
+    if (investAmount < 0.1) return;
+
+    const investmentResult = createDiplomaticInvestment(nation, target, investAmount, {
+      capacityShare: 0.35,
+      minAmountB: 0.1,
+      maturityTurns: 10,
+      context: 'diplomacy-investment',
+    });
+    if (!investmentResult) return;
     
     // Relation improvement
     const currentRel = getRelationBetween(nation.id, target.id);
     GAME.bilateralRelations[key] = clamp(currentRel + 4, -100, 100);
     
-    addNews(`💰 ${nation.flag} ${nation.name} invests $${(investAmount * 1000).toFixed(0)}M in ${target.flag} ${target.name}.`, 'minor');
+    addNews(`💰 ${nation.flag} ${nation.name} invests $${(investmentResult.amountB * 1000).toFixed(0)}M in ${target.flag} ${target.name}.`, 'minor');
   });
   
   // Process matured investments (returns after 10 turns)
@@ -627,6 +691,163 @@ function processInvestmentFlows() {
       delete GAME.diplomacyState.investments[key];
     }
   });
+}
+
+// ============================================================
+// BILATERAL ALLY LOANS - Direct government-to-government lending
+// ============================================================
+
+function processBilateralAllyLoans() {
+  initDiplomacyState();
+  if (!GAME.diplomacyState.bilateralLoans) GAME.diplomacyState.bilateralLoans = [];
+  if (!GAME.alliances || GAME.alliances.length === 0) return;
+
+  // ── STEP 1: Issue new loans between allied nations ─────────────────
+  // Only runs every 2 turns to avoid spam
+  if (GAME.turn % 2 === 0) {
+    const alreadyBorrowing = new Set(
+      GAME.diplomacyState.bilateralLoans.map(l => l.borrowerId)
+    );
+
+    for (const alliance of GAME.alliances) {
+      const pairs = [
+        { lenderId: alliance.a, borrowerId: alliance.b },
+        { lenderId: alliance.b, borrowerId: alliance.a },
+      ];
+
+      for (const { lenderId, borrowerId } of pairs) {
+        // Each borrower only carries one bilateral loan at a time
+        if (alreadyBorrowing.has(borrowerId)) continue;
+
+        const lender   = NATIONS[lenderId];
+        const borrower = NATIONS[borrowerId];
+        if (!lender || !borrower || lender.failedState || borrower.failedState) continue;
+
+        // Borrower must be in meaningful deficit (>= 10)
+        const borrowerDeficit = Number(borrower.deficit || 0);
+        if (borrowerDeficit < 10) continue;
+
+        // Lender must have treasury surplus — at least 3× its own monthly tax revenue free
+        const lenderTaxM      = Math.max(1, Number(lender.taxRevenue || 1));
+        const lenderTreasuryM = Number(lender.id === GAME.playerNation?.id ? GAME.treasury : lender.treasury || 0);
+        if (lenderTreasuryM < lenderTaxM * 3) continue;
+
+        // Loan amount: cover ~4 months of borrower's shortfall, capped by lender capacity
+        const borrowerGdpM      = Math.max(1, Number(borrower.gdp || 0.2) * 1_000_000 / 12);
+        const monthlyShortfallM = borrowerGdpM * clamp(borrowerDeficit / 100, 0.05, 0.5);
+        const maxLenderCanLend  = lenderTreasuryM * 0.25;
+        const principalM        = clamp(monthlyShortfallM * 4, 200, maxLenderCanLend);
+        if (principalM < 200) continue;
+
+        // Interest rate: lower for closer allies (high relation = cheaper loan)
+        const rel          = getRelationBetween(lenderId, borrowerId);
+        const interestRate = clamp(0.08 - rel * 0.0006, 0.02, 0.08);  // 2–8% flat
+        const totalOwed    = principalM * (1 + interestRate);
+        const repayTurns   = Math.floor(8 + Math.random() * 5);        // 8–12 months
+        const paymentPerTurnM = totalOwed / repayTurns;
+
+        // Random chance — not every eligible pair borrows every cycle
+        const loanChance = clamp(0.10 + (rel / 100) * 0.15, 0.08, 0.28);
+        if (Math.random() > loanChance) continue;
+
+        // Issue the loan
+        const loanId = `bloan_${GAME.turn}_${lenderId}_${borrowerId}`;
+        GAME.diplomacyState.bilateralLoans.push({
+          id:             loanId,
+          lenderId,
+          borrowerId,
+          principalM,
+          interestRate,
+          paymentPerTurnM,
+          turnsRemaining: repayTurns,
+          totalPaidM:     0,
+          issuedTurn:     GAME.turn,
+        });
+        alreadyBorrowing.add(borrowerId);
+
+        // Transfer capital: lender → borrower
+        if (lender.id === GAME.playerNation?.id) {
+          GAME.treasury = Math.max(0, (GAME.treasury || 0) - principalM);
+        } else {
+          lender.treasury = Math.max(0, lenderTreasuryM - principalM);
+        }
+        borrower.treasury = Math.max(0, Number(borrower.treasury || 0) + principalM);
+
+        const interestPct = (interestRate * 100).toFixed(0);
+        addNews(
+          `🏦 ${lender.flag} ${lender.name} extends $${(principalM / 1000).toFixed(1)}B ally loan` +
+          ` to ${borrower.flag} ${borrower.name} at ${interestPct}% interest (${repayTurns}-month term).`,
+          'minor'
+        );
+      }
+    }
+  }
+
+  // ── STEP 2: Process repayments for existing loans ─────────────────
+  const remainingLoans = [];
+  for (const loan of GAME.diplomacyState.bilateralLoans) {
+    const lender   = NATIONS[loan.lenderId];
+    const borrower = NATIONS[loan.borrowerId];
+
+    // Clean up if either nation has ceased to exist
+    if (!lender || !borrower || borrower.failedState) {
+      if (lender && !lender.failedState) {
+        const recovered = (loan.principalM - loan.totalPaidM) * 0.5;
+        if (recovered > 0) {
+          if (lender.id === GAME.playerNation?.id) GAME.treasury = (GAME.treasury || 0) + recovered;
+          else lender.treasury = Math.max(0, Number(lender.treasury || 0) + recovered);
+          addNews(`⚠️ ${lender.flag} ${lender.name} recovers $${(recovered / 1000).toFixed(1)}B from defaulted ${loan.borrowerId} ally loan.`, 'minor');
+        }
+        if (!borrower?.failedState) {
+          const key = relationshipKey(loan.lenderId, loan.borrowerId);
+          const cur = getRelationBetween(loan.lenderId, loan.borrowerId);
+          GAME.bilateralRelations[key] = clamp(cur - 12, -100, 100);
+        }
+      }
+      continue;
+    }
+
+    // Normal repayment
+    const borrowerTreasuryM = Number(borrower.id === GAME.playerNation?.id ? GAME.treasury : borrower.treasury || 0);
+    const canPay            = Math.min(loan.paymentPerTurnM, borrowerTreasuryM);
+    const shortfall         = loan.paymentPerTurnM - canPay;
+
+    if (borrower.id === GAME.playerNation?.id) {
+      GAME.treasury = Math.max(0, (GAME.treasury || 0) - canPay);
+    } else {
+      borrower.treasury = Math.max(0, borrowerTreasuryM - canPay);
+    }
+    if (lender.id === GAME.playerNation?.id) {
+      GAME.treasury = (GAME.treasury || 0) + canPay;
+    } else {
+      lender.treasury = Math.max(0, Number(lender.treasury || 0) + canPay);
+    }
+
+    loan.totalPaidM     += canPay;
+    loan.turnsRemaining -= 1;
+
+    if (shortfall > 50) {
+      const key = relationshipKey(loan.lenderId, loan.borrowerId);
+      const cur = getRelationBetween(loan.lenderId, loan.borrowerId);
+      GAME.bilateralRelations[key] = clamp(cur - 3, -100, 100);
+    }
+
+    if (loan.turnsRemaining <= 0) {
+      const interestEarned = loan.totalPaidM - loan.principalM;
+      addNews(
+        `✅ ${borrower.flag} ${borrower.name} repays $${(loan.principalM / 1000).toFixed(1)}B ally loan` +
+        ` to ${lender.flag} ${lender.name}` +
+        (interestEarned > 0 ? ` (+$${(interestEarned / 1000).toFixed(1)}B interest).` : '.'),
+        'minor'
+      );
+      const key = relationshipKey(loan.lenderId, loan.borrowerId);
+      const cur = getRelationBetween(loan.lenderId, loan.borrowerId);
+      GAME.bilateralRelations[key] = clamp(cur + 6, -100, 100);
+    } else {
+      remainingLoans.push(loan);
+    }
+  }
+  GAME.diplomacyState.bilateralLoans = remainingLoans;
 }
 
 // ============================================================
@@ -1060,6 +1281,7 @@ function processDiplomacyAll() {
   processForeignAid();
   processTradeAgreements();
   processInvestmentFlows();
+  processBilateralAllyLoans();
   processCoalitionFormation();
   processDiplomaticPressure();
 }
